@@ -13,7 +13,7 @@ export interface Group {
 }
 
 export const DOCS_VERSION = "Part 10 / 10";
-export const REPO_URL = "https://github.com/aadityakumarsah/birgro";
+export const REPO_URL = "https://github.com/aadityakumarsah/ai-agent-bank";
 
 export const GROUPS: Group[] = [
   {
