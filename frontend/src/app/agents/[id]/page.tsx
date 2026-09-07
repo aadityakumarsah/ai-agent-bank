@@ -4,6 +4,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import { useWalletConnection } from "@/components/wallet/wallet-context";
 import { AgentDetail } from "@/components/agent/agent-detail";
 
+export const runtime = "edge";
+
 export default function AgentPage({ params }: { params: { id: string } }) {
   const { connected } = useWalletConnection();
 

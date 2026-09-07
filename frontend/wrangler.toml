@@ -1,0 +1,9 @@
+# Wrangler config for the AI Agent Bank dashboard (Cloudflare Pages).
+# Build output is produced by `next-on-pages` into .vercel/output/static.
+
+name = "solbank"
+
+# These affect the generated Pages Functions Worker (from _worker.js from
+# @cloudflare/next-on-pages). node:buffer / node:async_hooks require it.
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
