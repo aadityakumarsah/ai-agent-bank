@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 27% 98%;
+    --foreground: 224 36% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 36% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 36% 12%;
+    --primary: 158 72% 38%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 18% 92%;
+    --secondary-foreground: 224 30% 14%;
+    --muted: 220 16% 91%;
+    --muted-foreground: 220 12% 44%;
+    --accent: 222 18% 93%;
+    --accent-foreground: 224 30% 14%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 35%;
+    --success-foreground: 0 0% 100%;
+    --warning: 36 95% 46%;
+    --warning-foreground: 224 40% 8%;
+    --info: 215 85% 50%;
+    --info-foreground: 0 0% 100%;
+    --border: 220 14% 87%;
+    --input: 220 14% 84%;
+    --ring: 158 72% 38%;
+    --radius: 0.75rem;
+    --sidebar: 220 22% 95%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+  }
+
+  button,
+  a,
+  input,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.6);
+}
+
+/* Solana wallet adapter buttons — force themed styling */
+.wallet-adapter-button {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  border-radius: var(--radius) !important;
+  font-weight: 600 !important;
+  height: 2.25rem !important;
+  font-size: 0.8125rem !important;
+  padding: 0 1rem !important;
+  transition: opacity 0.2s ease !important;
+}
+.wallet-adapter-button:hover {
+  opacity: 0.9 !important;
+}
+.wallet-adapter-modal-wrapper {
+  background-color: hsl(var(--card)) !important;
+}
+.wallet-adapter-modal-button-close {
+  background-color: hsl(var(--secondary)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+.wallet-adapter-modal-list li button {
+  background-color: hsl(var(--secondary)) !important;
+  color: hsl(var(--foreground)) !important;
+}

@@ -1,0 +1,106 @@
+"use client";
+
+import { Wallet, Loader2, Copy, Check, LogOut } from "lucide-react";
+import { useWalletConnection } from "./wallet-context";
+import { Button } from "@/components/ui/button";
+import { shortAddress } from "@/lib/utils";
+import { getWalletBalances } from "@/lib/solana";
+import { useEffect, useState } from "react";
+
+export function WalletConnectButton({ compact }: { compact?: boolean }) {
+  const { connected, connecting, address, isDemo, connect, disconnect, error } =
+    useWalletConnection();
+  const [copied, setCopied] = useState(false);
+  const [sol, setSol] = useState<number | null>(null);
+  const [usdc, setUsdc] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (connected && address && !isDemo) {
+      setSol(null);
+      setUsdc(null);
+      getWalletBalances(address)
+        .then((b) => {
+          if (!cancelled) {
+            setSol(b.sol);
+            setUsdc(b.usdc);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSol(null);
+            setUsdc(null);
+          }
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, address, isDemo]);
+
+  if (!connected) {
+    return (
+      <div className="flex items-center gap-2">
+        {error && <span className="text-xs text-destructive">{error}</span>}
+        <Button size={compact ? "sm" : "default"} onClick={connect} disabled={connecting}>
+          {connecting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Wallet className="h-4 w-4" />
+          )}
+          {connecting ? "Connecting…" : compact ? "Connect" : "Connect Wallet"}
+        </Button>
+      </div>
+    );
+  }
+
+  const copy = () => {
+    if (!address) return;
+    navigator.clipboard?.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {isDemo && !compact && (
+        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold text-warning">
+          DEMO
+        </span>
+      )}
+      {!isDemo && !compact && connected && (
+        <div className="hidden items-center gap-1.5 md:flex">
+          <span
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-[11px] tabular-nums text-muted-foreground"
+            title="SOL balance"
+          >
+            {sol === null ? "—" : `${sol.toFixed(2)} SOL`}
+          </span>
+          <span
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-[11px] tabular-nums text-muted-foreground"
+            title="USDC balance"
+          >
+            {usdc === null ? "—" : `$${usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+          </span>
+        </div>
+      )}
+      <button
+        onClick={copy}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        title={address || undefined}
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        <span className="font-mono">{shortAddress(address, compact ? 4 : 5)}</span>
+      </button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        onClick={disconnect}
+        title="Disconnect"
+      >
+        <LogOut className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}

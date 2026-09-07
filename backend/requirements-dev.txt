@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# Testing
+pytest==8.3.4
+requests==2.32.3
+
+# Python tooling
+ruff==0.15.20

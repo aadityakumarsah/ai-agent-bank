@@ -1,0 +1,24 @@
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+pydantic-settings==2.1.0
+sqlalchemy==2.0.27
+alembic==1.13.1
+psycopg2-binary==2.9.9
+redis==5.0.1
+httpx==0.26.0
+python-dotenv==1.0.1
+passlib==1.7.4
+python-jose[cryptography]==3.3.0
+
+# End-user supplied LLM provider SDKs (optional at import time). Only needed
+# when a wallet attaches its own key for that provider in Settings; the demo
+# runs entirely on the mock responder without any of these.
+openai==1.35.5
+anthropic==0.26.1
+google-generativeai==0.7.2
+
+# Real Solana payment (REAL MODE). Required only if USE_REAL_PAYMENT=true;
+# MOCK MODE works without these. `spl.token` ships inside the `solana` wheel.
+solana==0.38.0
+solders==0.27.1
