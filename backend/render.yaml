@@ -1,15 +1,13 @@
 # Render Blueprint — AI Agent Bank API
-# Deploy on Render (free web service). The app runs in DEMO MODE with a SQLite
-# database by default, so it needs NO external keys and NO database to work.
+# Deploys via Dockerfile for a pinned Python version (3.12) with prebuilt wheels.
+# Runs in DEMO MODE with a SQLite database: no external keys, no DB required.
 
 services:
   - type: web
     name: ai-agent-bank-api
-    runtime: python
+    runtime: docker
     plan: free
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: DEMO_MODE
@@ -22,8 +20,6 @@ services:
         value: "false"
       - key: SECRET_KEY
         generateValue: true
-      # Allow the Cloudflare Pages dashboard to call this API from the browser.
+      # Let the Cloudflare Pages dashboard call this API from the browser.
       - key: BACKEND_CORS_ORIGINS
         value: '["https://solbank.pages.dev","https://*.pages.dev"]'
-      - key: PYTHON_VERSION
-        value: "3.11.12"
