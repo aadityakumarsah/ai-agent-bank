@@ -1,6 +1,6 @@
 "use client";
 
-import { Wallet, Loader2, Sparkles } from "lucide-react";
+import { Wallet, Loader2 } from "lucide-react";
 import { useWalletConnection } from "@/components/wallet/wallet-context";
 
 export function ConnectGate({ children }: { children: React.ReactNode }) {
@@ -15,11 +15,11 @@ export function ConnectGate({ children }: { children: React.ReactNode }) {
       </div>
       <div>
         <h3 className="text-sm font-semibold text-foreground">
-          Connect a wallet to continue
+          Connect your Solana wallet
         </h3>
         <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-          Connect a Solana wallet, or use the simulated wallet to explore the full
-          demo without one.
+          Your wallet signs every funding transfer and approval. It keeps
+          full control — the agent can never spend beyond the limits you set.
         </p>
       </div>
       <button
@@ -30,12 +30,13 @@ export function ConnectGate({ children }: { children: React.ReactNode }) {
         {connecting ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
-          <>
-            <Sparkles className="h-4 w-4" />
-            Connect demo wallet
-          </>
+          <Wallet className="h-4 w-4" />
         )}
+        {connecting ? "Connecting…" : "Connect wallet"}
       </button>
+      <p className="text-xs text-muted-foreground">
+        Solflare or Phantom browser extension required to sign real USDC transfers.
+      </p>
     </div>
   );
 }

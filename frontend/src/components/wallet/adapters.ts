@@ -1,3 +1,9 @@
+export interface ConnectedWallet {
+  publicKey: { toBase58(): string };
+  /** Human-readable wallet type, e.g. "Solflare", "Phantom" or "Browser wallet". */
+  providerName: string;
+}
+
 type WalletProvider = {
   isPhantom?: boolean;
   isSolflare?: boolean;
@@ -7,7 +13,7 @@ type WalletProvider = {
 const SOLFLARE_PROVIDER = "solflare";
 const PHANTOM_PROVIDER = "phantom";
 
-function pickProvider(): WalletProvider | null {
+function pickProvider(): { provider: WalletProvider; name: string } | null {
   const w = window as unknown as Record<string, unknown> & { solana?: WalletProvider };
   // Solflare browser extension injects its own global (and also mirrors
   // window.solana). Prefer the dedicated global so a Solflare user isn't
@@ -17,7 +23,7 @@ function pickProvider(): WalletProvider | null {
     w[SOLFLARE_PROVIDER] !== null &&
     typeof (w[SOLFLARE_PROVIDER] as WalletProvider).connect === "function"
   ) {
-    return w[SOLFLARE_PROVIDER] as WalletProvider;
+    return { provider: w[SOLFLARE_PROVIDER] as WalletProvider, name: "Solflare" };
   }
   // Generic injected provider (Phantom, or Solflare exposing window.solana).
   const solana = w.solana;
@@ -26,31 +32,29 @@ function pickProvider(): WalletProvider | null {
     typeof solana.connect === "function" &&
     (solana.isPhantom === true || solana.isSolflare === true)
   ) {
-    return solana;
+    return { provider: solana, name: solana.isPhantom === true ? "Phantom" : "Solflare" };
   }
   return null;
 }
 
-export function tryConnect(): Promise<{
-  publicKey: { toBase58(): string };
-} | null> {
-  const provider = pickProvider();
-  if (!provider) return Promise.resolve(null);
+export async function tryConnect(): Promise<ConnectedWallet | null> {
+  const picked = pickProvider();
+  if (!picked) return null;
 
-  return provider
+  return picked.provider
     .connect()
     .then((res) => {
       if (!res?.publicKey) return null;
-      return { publicKey: res.publicKey };
+      return { publicKey: res.publicKey, providerName: picked.name };
     })
     .catch(() => null);
 }
 
-export function tryDisconnect(): Promise<void> {
-  const provider = pickProvider();
-  if (provider && typeof (provider as WalletProvider & { disconnect?: () => unknown }).disconnect === "function") {
+export async function tryDisconnect(): Promise<void> {
+  const picked = pickProvider();
+  if (picked && typeof (picked.provider as WalletProvider & { disconnect?: () => unknown }).disconnect === "function") {
     try {
-      (provider as WalletProvider & { disconnect: () => unknown }).disconnect();
+      (picked.provider as WalletProvider & { disconnect: () => unknown }).disconnect();
     } catch {
       /* ignore */
     }

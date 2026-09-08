@@ -24,7 +24,7 @@ const FLOW = [
 
 export function LandingPage() {
   const router = useRouter();
-  const { connect, connecting, isDemo } = useWalletConnection();
+  const { connect, connecting } = useWalletConnection();
   const [launching, setLaunching] = useState(false);
 
   const launch = async () => {
@@ -141,7 +141,7 @@ export function LandingPage() {
 
       <footer className="border-t border-border py-6">
         <p className="text-center text-xs text-muted-foreground">
-          AI Agent Bank — {isDemo ? "connected through the simulated demo wallet." : "the AI proposes, the policy engine decides, the blockchain executes."}
+          AI Agent Bank — the AI proposes, the policy engine decides, the blockchain executes.
         </p>
       </footer>
     </div>

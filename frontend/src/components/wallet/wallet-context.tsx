@@ -3,12 +3,15 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { Keypair } from "@solana/web3.js";
 
-import { DEMO_ADDRESS } from "./demo-address";
+export type WalletType = "Solflare" | "Phantom" | "Imported key" | "Browser wallet";
 
 interface WalletContextValue {
   connected: boolean;
   connecting: boolean;
   address: string | null;
+  /** Human-readable wallet type shown to the user (e.g. Solflare / Phantom). */
+  walletType: WalletType | null;
+  /** False always on the real flow — there is no simulated wallet anymore. */
   isDemo: boolean;
   signingKey: Keypair | null;
   connect: () => Promise<void>;
@@ -21,6 +24,7 @@ const WalletContext = createContext<WalletContextValue>({
   connected: false,
   connecting: false,
   address: null,
+  walletType: null,
   isDemo: false,
   signingKey: null,
   connect: async () => {},
@@ -35,6 +39,7 @@ export function useWalletConnection() {
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
+  const [walletType, setWalletType] = useState<WalletType | null>(null);
   const [isDemo, setIsDemo] = useState(false);
   const [signingKey, setSigningKey] = useState<Keypair | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -45,19 +50,19 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setConnecting(true);
     setSigningKey(null);
     try {
-      // Try real Solana wallet adapter first (Phantom etc.)
+      // Real Solana wallet adapter only (Solflare / Phantom browser extension).
+      // There is no simulated fallback: a real user must have a real wallet.
       const { tryConnect } = await import("@/components/wallet/adapters");
       const adapter = await tryConnect();
-      if (adapter) {
-        setAddress(adapter.publicKey.toBase58());
-        setIsDemo(false);
+      if (!adapter?.publicKey) {
+        setError(
+          "No Solana wallet found. Install the Solflare or Phantom browser extension, then try again."
+        );
         return;
       }
-      // Fallback to demo wallet so the full UX is demoable without a wallet.
-      const { default: connectDemo } = await import("@/components/wallet/demo-connect");
-      const demoAddr = connectDemo();
-      setAddress(demoAddr);
-      setIsDemo(true);
+      setAddress(adapter.publicKey.toBase58());
+      setWalletType(adapter.providerName as WalletType);
+      setIsDemo(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet");
     } finally {
@@ -87,6 +92,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const kp = SolKeypair.fromSecretKey(decoded);
       setSigningKey(kp);
       setAddress(kp.publicKey.toBase58());
+      setWalletType("Imported key");
       setIsDemo(false);
       return kp.publicKey.toBase58();
     } catch (e) {
@@ -103,6 +109,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
     setAddress(null);
+    setWalletType(null);
     setIsDemo(false);
     setSigningKey(null);
     setError(null);
@@ -113,6 +120,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       connected: !!address,
       connecting,
       address,
+      walletType,
       isDemo,
       signingKey,
       connect,
@@ -120,7 +128,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       disconnect,
       error,
     }),
-    [address, isDemo, signingKey, connecting, connect, connectWithKey, disconnect, error]
+    [address, walletType, isDemo, signingKey, connecting, connect, connectWithKey, disconnect, error]
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

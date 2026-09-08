@@ -99,13 +99,23 @@ class GoogleProvider(LLMProvider):
         return resp.text or ""
 
 
+class NoLLMConfiguredError(RuntimeError):
+    """Raised in real mode when an agent task needs reasoning but no LLM key
+    is configured (neither a per-wallet key nor a server-level key).
+
+    Real agents reason with a genuine model — a hardcoded fake is never an
+    acceptable substitute. The user adds their key in Settings (stored
+    encrypted, per wallet) or the deployment sets OPENAI/ANTHROPIC/GOOGLE key.
+    """
+
+
 class MockLLMProvider(LLMProvider):
     """
-    Demo provider. Simulates an AI agent deciding to make a policy-compliant
-    payment (e.g. purchase RPC access) without requiring any external API key.
+    DEMO-only provider. Simulates an AI agent deciding to make a
+    policy-compliant payment without requiring any external API key.
 
-    It returns a structured plan that the agent runtime can execute through the
-    policy engine, so the full demo UX works with zero configuration.
+    Guardrail: even if an instance is constructed, ``complete()`` refuses to
+    answer when DEMO_MODE is off. Real agents must never read scripted output.
     """
 
     @property
@@ -117,6 +127,16 @@ class MockLLMProvider(LLMProvider):
         return True
 
     def complete(self, system: str, user: str) -> str:
+        if not settings.DEMO_MODE:
+            logger.error(
+                "MockLLMProvider.complete called with DEMO_MODE off — refusing to "
+                "simulate an agent's reasoning in real mode."
+            )
+            raise NoLLMConfiguredError(
+                "No LLM is configured. Add an API key for your agent in Settings "
+                "(or set OPENAI_API_KEY/ANTHROPIC_API_KEY/GOOGLE_AI_API_KEY on the "
+                "server) before running a real task."
+            )
         lower = user.lower()
 
         # --- Attack vector: agent tries to sweep funds to an unknown human wallet.
@@ -172,10 +192,17 @@ def build_provider(name: Optional[str], api_key: Optional[str]) -> LLMProvider:
 
 
 class LLMService:
-    """Routes to the appropriate provider based on available API keys."""
+    """Routes to the appropriate provider based on available API keys.
+
+    In DEMO_MODE the mock provider is part of the chain so the UX works with
+    zero keys. In real mode mock is excluded entirely: a task without a genuine
+    LLM raises :class:`NoLLMConfiguredError` instead of silently simulating.
+    """
 
     def __init__(self):
-        self.providers: List[LLMProvider] = [MockLLMProvider()]
+        self.providers: List[LLMProvider] = []
+        if settings.DEMO_MODE:
+            self.providers.append(MockLLMProvider())
         # Appends real providers whose keys are configured on the server.
         for provider in (OpenAIProvider(), AnthropicProvider(), GoogleProvider()):
             if provider.configured:
@@ -183,11 +210,17 @@ class LLMService:
 
     @property
     def active_provider(self) -> LLMProvider:
-        # Prefer real providers over mock when configured
+        # Prefer real providers over mock when configured.
         for p in self.providers:
             if p.name != "mock":
                 return p
-        return self.providers[0]
+        if self.providers:
+            return self.providers[0]
+        raise NoLLMConfiguredError(
+            "No LLM provider is configured. Add an API key for your agent in "
+            "Settings (or set OPENAI_API_KEY/ANTHROPIC_API_KEY/GOOGLE_AI_API_KEY "
+            "on the server) to run real agent tasks."
+        )
 
     def resolve_provider(
         self,
@@ -195,7 +228,8 @@ class LLMService:
         api_key: Optional[str] = None,
     ) -> LLMProvider:
         """Pick the provider for a call. An explicitly passed key wins over the
-        server env key. Falls back to any configured server provider, then mock."""
+        server env key. Falls back to any configured server provider, then mock
+        (demo only). Never silently simulates in real mode."""
         if provider_name and api_key:
             cls = _PROVIDER_CLASSES.get(provider_name)
             if cls is not None:

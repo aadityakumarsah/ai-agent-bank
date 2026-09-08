@@ -9,7 +9,7 @@ import { getWalletBalances } from "@/lib/solana";
 import { useEffect, useState } from "react";
 
 export function WalletConnectButton({ compact }: { compact?: boolean }) {
-  const { connected, connecting, address, isDemo, connect, connectWithKey, disconnect, error } =
+  const { connected, connecting, address, walletType, connect, connectWithKey, disconnect, error } =
     useWalletConnection();
   const [copied, setCopied] = useState(false);
   const [sol, setSol] = useState<number | null>(null);
@@ -20,7 +20,7 @@ export function WalletConnectButton({ compact }: { compact?: boolean }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (connected && address && !isDemo) {
+    if (connected && address) {
       setSol(null);
       setUsdc(null);
       getWalletBalances(address)
@@ -40,7 +40,7 @@ export function WalletConnectButton({ compact }: { compact?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [connected, address, isDemo]);
+  }, [connected, address]);
 
   const submitKey = async () => {
     if (!keyInput.trim()) return;
@@ -110,12 +110,15 @@ export function WalletConnectButton({ compact }: { compact?: boolean }) {
 
   return (
     <div className="flex items-center gap-1.5">
-      {isDemo && !compact && (
-        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold text-warning">
-          DEMO
+      {walletType && !compact && (
+        <span
+          className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary"
+          title="Connected wallet type"
+        >
+          {walletType}
         </span>
       )}
-      {!isDemo && !compact && connected && (
+      {connected && !compact && (
         <div className="hidden items-center gap-1.5 md:flex">
           <span
             className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-[11px] tabular-nums text-muted-foreground"

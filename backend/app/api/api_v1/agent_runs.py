@@ -7,6 +7,7 @@ from app.api.deps import require_wallet_ownership
 from app.db.models import User, Agent, AgentStatus, Transaction, TaskRun
 from app.schemas import TaskCreate, TaskOut, TransactionOut
 from app.services.agent_runtime import agent_runtime
+from app.services.ai_service import NoLLMConfiguredError
 from app.services.redis_service import redis_client
 
 router = APIRouter(
@@ -59,7 +60,15 @@ def run_task(
         raise HTTPException(status_code=429, detail="Too many task runs. Slow down.")
 
     run = agent_runtime.create_task(db, agent, payload.task)
-    result = agent_runtime.execute_task(db, agent, run)
+    try:
+        result = agent_runtime.execute_task(db, agent, run)
+    except NoLLMConfiguredError as e:
+        # Real mode + no LLM key: surface a helpful 400 instead of a 500, and
+        # never let the run pretend it reasoned when it couldn't.
+        run.status = "failed"
+        run.error = str(e)
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(e))
 
     return TaskOut(
         run_id=result["run_id"],

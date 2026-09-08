@@ -53,7 +53,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function WalletStatus() {
-  const { connected, connecting, address, isDemo, connect, disconnect } = useWalletConnection();
+  const { connected, connecting, address, walletType, connect, disconnect } = useWalletConnection();
   const [copied, setCopied] = useState(false);
 
   const copy = () => {
@@ -110,9 +110,9 @@ function WalletStatus() {
           Disconnect
         </button>
       </div>
-      {isDemo && (
-        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-semibold text-warning">
-          SIMULATED WALLET
+      {walletType && (
+        <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+          {walletType}
         </div>
       )}
     </div>

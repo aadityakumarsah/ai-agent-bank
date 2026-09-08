@@ -13,8 +13,10 @@ import {
 } from "lucide-react";
 import { useWalletConnection } from "@/components/wallet/wallet-context";
 import { api } from "@/lib/api";
+import { signAndSendUsdcTransfer } from "@/lib/solana";
 import { SUGGESTED_AGENTS } from "@/lib/demo";
 import { PERMISSIONS, type PermissionKey } from "@/lib/types";
+import { useConfigStatus } from "@/hooks/use-config-status";
 import { Stepper } from "@/components/ui/stepper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +41,8 @@ const DEFAULT_PERMISSIONS: Record<string, boolean> = {
 };
 
 export function CreateAgentWizard() {
-  const { address } = useWalletConnection();
+  const { address, signingKey } = useWalletConnection();
+  const { status } = useConfigStatus();
   const router = useRouter();
   const { toast } = useToast();
 
@@ -76,10 +79,14 @@ export function CreateAgentWizard() {
 
   const createAgent = async () => {
     if (!address) return;
+    const budgetUsdc = parseFloat(budget) || 0;
+    const realMode = status?.payment_mode === "real";
     setCreating(true);
     setError(null);
+    let agentId: number | null = null;
     try {
       const agent = await api.createAgent(address, name.trim(), description.trim() || undefined);
+      agentId = agent.id;
       await api.setPolicy(address, agent.id, {
         max_per_transaction: parseFloat(maxPerTx) || 0,
         max_per_day: parseFloat(maxPerDay) || 0,
@@ -94,19 +101,62 @@ export function CreateAgentWizard() {
           .map((s) => s.trim())
           .filter(Boolean),
       });
-      if ((parseFloat(budget) || 0) > 0) {
-        await api.fundAgent(address, agent.id, parseFloat(budget));
+
+      if (budgetUsdc > 0) {
+        const res = await api.fundAgent(address, agent.id, budgetUsdc);
+
+        if (res.mode === "solana" && res.payment_request) {
+          // REAL MODE — your wallet signs a real USDC transfer into the escrow.
+          const req = res.payment_request;
+          const signature = await signAndSendUsdcTransfer({
+            from: address,
+            to: req.to_address,
+            amount: budgetUsdc,
+            mint: req.mint,
+            keypair: signingKey ?? undefined,
+          });
+          await api.confirmFund(address, agent.id, budgetUsdc, signature);
+        } else if (res.mode === "mock") {
+          // MOCK MODE — simulated funding, clearly labelled.
+          toast({
+            type: "info",
+            title: "Simulated funding",
+            description: "Agent funded with simulated USDC (MOCK MODE).",
+          });
+        }
+      } else if (realMode) {
+        // No funding requested — the agent starts with a $0.00 escrow and can
+        // only fund later from the agent page.
+        toast({
+          type: "info",
+          title: "Agent created unfunded",
+          description: "Add funds from the agent page when ready.",
+        });
       }
+
       setCreatedAgentId(agent.id);
       toast({
         type: "success",
         title: "Agent created",
-        description: `${name.trim()} is funded and policy-locked, ready for tasks.`,
+        description: realMode
+          ? `${name.trim()} is deployed and policy-locked. ${
+              budgetUsdc > 0 ? "Escrow funded on-chain." : "Fund it from the agent page."
+            }`
+          : `${name.trim()} is funded and policy-locked, ready for tasks.`,
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to create agent";
       setError(message);
       toast({ type: "error", title: "Could not create agent", description: message });
+      if (agentId != null) {
+        // Avoid an orphaned agent the user thinks is funded.
+        try {
+          await api.killAgent(address, agentId);
+        } catch {
+          /* ignore */
+        }
+        setCreatedAgentId(null);
+      }
     } finally {
       setCreating(false);
     }
@@ -121,10 +171,25 @@ export function CreateAgentWizard() {
         <div>
           <h2 className="text-xl font-bold text-foreground">Agent deployed</h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{name.trim()}</span> is now funded
-            with <span className="tabular-nums">{formatUsdc(parseFloat(budget))}</span> USDC and
-            protected by its policy. It proposes — the engine decides.
+            <span className="font-medium text-foreground">{name.trim()}</span> is
+            deployed and locked behind its policy. It proposes — the engine
+            decides.
           </p>
+          {status?.payment_mode === "real" ? (
+            parseFloat(budget) > 0 ? (
+              <p className="mt-2 text-xs text-success">
+                Escrow funded on-chain with {formatUsdc(parseFloat(budget))} USDC.
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Agent created unfunded — fund it from the agent page when ready.
+              </p>
+            )
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Escrow funded (SIMULATED) with {formatUsdc(parseFloat(budget))} USDC in MOCK MODE.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <Button variant="outline" onClick={() => router.push("/agents")}>

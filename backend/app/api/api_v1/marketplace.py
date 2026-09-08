@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.limiter import RateLimiter
+from app.core.config import settings
 from app.db.session import get_db
 from app.db.models import (
     Agent,
@@ -87,6 +88,9 @@ def _get_service(db: Session, service_id: int) -> ServiceDirectory:
         raise HTTPException(status_code=404, detail="Service not found")
     if not service.active:
         raise HTTPException(status_code=400, detail="Service is inactive")
+    if service.is_demo and not settings.DEMO_MODE:
+        # Demo listings carry fake wallet addresses; never offer them in real mode.
+        raise HTTPException(status_code=404, detail="Service not found")
     return service
 
 
@@ -121,10 +125,16 @@ def _tx_to_dict(tx: Transaction):
 # ---------------------------------------------------------------------------
 @router.get("", response_model=list[ServiceOut])
 def list_services(db: Session = Depends(get_db)):
-    """List the service directory. Includes demo services, clearly flagged."""
-    services = (
-        db.query(ServiceDirectory).order_by(ServiceDirectory.category, ServiceDirectory.id).all()
-    )
+    """List the service directory.
+
+    Includes demo services, clearly flagged, in DEMO_MODE. In real mode the
+    demo listings (fake wallet addresses) are excluded so a real agent can
+    never be offered a pay route that doesn't exist on-chain.
+    """
+    query = db.query(ServiceDirectory)
+    if not settings.DEMO_MODE:
+        query = query.filter(ServiceDirectory.is_demo.is_(False))
+    services = query.order_by(ServiceDirectory.category, ServiceDirectory.id).all()
     return [_service_to_out(s) for s in services]
 
 
@@ -661,7 +671,11 @@ def killer_demo(
     The agent requests the Solana RPC API service, the API requires $0.02, the
     agent asks the bank, the policy engine approves ($0.02 < $20, daily limit
     OK), USDC payment executes, the API responds, and the agent summarizes.
+
+    DEMO_MODE only — a real deployment has no scripted scenarios.
     """
+    if not settings.DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Demo scenarios are disabled.")
     agent_id = payload.get("agent_id")
     if not agent_id:
         raise HTTPException(status_code=400, detail="agent_id is required")
@@ -712,7 +726,11 @@ def failed_payment_demo(
     it because max per-transaction is $20. The agent can then continue searching
     for another service — autonomous economic reasoning without uncontrolled
     spending.
+
+    DEMO_MODE only — a real deployment has no scripted scenarios.
     """
+    if not settings.DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Demo scenarios are disabled.")
     agent_id = payload.get("agent_id")
     if not agent_id:
         raise HTTPException(status_code=400, detail="agent_id is required")

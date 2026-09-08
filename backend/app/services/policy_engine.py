@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import (
     Policy,
     Transaction,
@@ -50,7 +51,9 @@ class PolicyEngine:
     """
 
     TRUSTED_RECIPIENTS = {
-        # Mock demo merchants / providers
+        # Mock demo merchants / providers — DEMO_MODE only. These are aliases
+        # with no real on-chain address; in real mode they are never treated as
+        # trusted (a recipient must be a real address on the policy whitelist).
         "rpcProvider": {
             "name": "Solana RPC Provider",
             "category": "compute",
@@ -277,16 +280,18 @@ class PolicyEngine:
         )
 
         # --- Check 8: Recipient trusted / whitelisted ---
-        # A recipient is trusted if it is in the policy's explicit whitelist,
-        # OR it is a known trusted provider/merchant, OR it is another registered
-        # agent (category == "agent").
+        # A recipient is trusted if it is on the policy's explicit whitelist
+        # (a real address), OR — DEMO_MODE only — it is a known demo
+        # provider/merchant alias. In real mode there are no pseudo-trusted
+        # aliases: only the addresses the owner whitelisted count.
         whitelist = self._parse_json(policy.allowed_recipient_addresses, [])
 
         known_provider = None
-        for key, info in self.TRUSTED_RECIPIENTS.items():
-            if recipient_address == key:
-                known_provider = info
-                break
+        if settings.DEMO_MODE:
+            for key, info in self.TRUSTED_RECIPIENTS.items():
+                if recipient_address == key:
+                    known_provider = info
+                    break
 
         # For demo/real: addresses are pseudonymous; we can't cryptographically
         # determine 'human' vs 'agent' yet, so we enforce:

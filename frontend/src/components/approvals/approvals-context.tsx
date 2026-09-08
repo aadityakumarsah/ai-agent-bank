@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalRequest } from "@/lib/types";
 import { seedApprovals } from "@/lib/demo";
+import { api } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 import { formatUsdc } from "@/lib/utils";
 
@@ -40,8 +41,28 @@ export function useApprovals() {
 
 export function ApprovalsProvider({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
-  const [requests, setRequests] = useState<ApprovalRequest[]>(() => seedApprovals());
+  const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const seeded = useRef<Set<number>>(new Set());
+
+  // Only seed simulated demo approvals when the backend is in DEMO_MODE. In
+  // real mode the approvals list is 100% real pending transactions
+  // (syncFromTransactions) — no fabricated requests.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getStatus()
+      .then((s) => {
+        if (!cancelled && s.demo_mode) {
+          setRequests(seedApprovals());
+        }
+      })
+      .catch(() => {
+        /* offline — leave empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const syncFromTransactions = useCallback(
     (txs: ApprovalSyncTx[], agentIdToName?: Map<number, string>) => {

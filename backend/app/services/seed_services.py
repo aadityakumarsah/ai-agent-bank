@@ -7,6 +7,7 @@ marketplace and never return real payable endpoint responses.
 
 from decimal import Decimal
 
+from app.core.config import settings
 from app.db.models import (
     ServiceDirectory,
     ServiceCategory,
@@ -82,7 +83,14 @@ DEMO_SERVICES = [
 
 
 def seed_service_directory(db) -> int:
-    """Insert the demo services if the directory is empty. Returns count created."""
+    """Insert the demo services if the directory is empty. DEMO_MODE only.
+
+    In real mode the marketplace is genuinely empty until real providers are
+    added — a demo listing with a fake wallet address must never appear next
+    to real money paths.
+    """
+    if not settings.DEMO_MODE:
+        return 0
     if db.query(ServiceDirectory).count() > 0:
         return 0
 

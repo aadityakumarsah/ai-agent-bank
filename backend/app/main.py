@@ -51,12 +51,17 @@ def create_app() -> FastAPI:
     app.include_router(agents.router, prefix=settings.API_V1_STR)
     app.include_router(transactions.router, prefix=settings.API_V1_STR)
     app.include_router(agent_runs.router, prefix=settings.API_V1_STR)
-    app.include_router(demo.router, prefix=settings.API_V1_STR)
-    app.include_router(demo_scenarios.router, prefix=settings.API_V1_STR)
     app.include_router(config.router, prefix=settings.API_V1_STR)
     app.include_router(marketplace.router, prefix=settings.API_V1_STR)
     app.include_router(llm_keys.router, prefix=settings.API_V1_STR)
     app.include_router(auth.router, prefix=settings.API_V1_STR)
+
+    # DEMO-only simulation endpoints: one-click attack scenarios and the demo
+    # service directory. Never mounted in real mode — a real deployment has no
+    # simulated activity behind its API.
+    if settings.DEMO_MODE:
+        app.include_router(demo.router, prefix=settings.API_V1_STR)
+        app.include_router(demo_scenarios.router, prefix=settings.API_V1_STR)
 
     @app.on_event("startup")
     def on_startup() -> None:

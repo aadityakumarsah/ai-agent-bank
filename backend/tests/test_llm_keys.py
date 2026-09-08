@@ -93,6 +93,32 @@ def test_resolve_provider_prefers_user_key_over_server_and_mock():
     assert isinstance(llm_service.resolve_provider("nope", "some-key"), MockLLMProvider)
 
 
+def test_real_mode_never_falls_back_to_mock(monkeypatch):
+    """Real mode excludes the mock provider, so a task with no LLM key raises
+    instead of silently simulating an agent's reasoning."""
+    from app.core.config import settings
+    from app.services.ai_service import (
+        LLMService,
+        MockLLMProvider,
+        NoLLMConfiguredError,
+    )
+
+    monkeypatch.setattr(settings, "DEMO_MODE", False)
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
+    monkeypatch.setattr(settings, "GOOGLE_AI_API_KEY", "")
+
+    real_service = LLMService()
+    assert not any(isinstance(p, MockLLMProvider) for p in real_service.providers)
+
+    try:
+        real_service.active_provider
+    except NoLLMConfiguredError:
+        pass  # expected
+    else:
+        raise AssertionError("expected NoLLMConfiguredError in real mode without a key")
+
+
 def test_parse_proposal_tolerates_code_fences(client):
     from app.services.agent_runtime import agent_runtime
 
