@@ -8,6 +8,7 @@ import {
   Connection,
   PublicKey,
   Transaction,
+  Keypair,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import {
@@ -98,15 +99,9 @@ export async function signAndSendUsdcTransfer(opts: {
   to: string;
   amount: number;
   mint?: string;
+  keypair?: Keypair;
 }): Promise<string> {
   const connection = getConnection();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const wallet = (window as any).solana;
-  if (!wallet || typeof wallet.signTransaction !== "function") {
-    throw new Error(
-      "REAL MODE requires a Solana wallet that can sign transactions (e.g. Phantom)."
-    );
-  }
 
   const owner = new PublicKey(opts.from);
   const recipient = new PublicKey(opts.to);
@@ -131,8 +126,30 @@ export async function signAndSendUsdcTransfer(opts: {
     )
   );
 
-  const signed = await wallet.signTransaction(tx);
-  const signature = await connection.sendRawTransaction(signed.serialize(), {
+  // A pasted secret key signs directly (no browser extension needed).
+  if (opts.keypair) {
+    tx.sign(opts.keypair);
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wallet = (window as any).solana;
+    if (!wallet || typeof wallet.signTransaction !== "function") {
+      throw new Error(
+        "REAL MODE requires a Solana wallet that can sign transactions (e.g. Phantom)."
+      );
+    }
+    const signed = await wallet.signTransaction(tx);
+    const signature = await connection.sendRawTransaction(signed.serialize(), {
+      skipPreflight: false,
+    });
+    await connection.confirmTransaction({
+      signature,
+      blockhash,
+      lastValidBlockHeight,
+    });
+    return signature;
+  }
+
+  const signature = await connection.sendRawTransaction(tx.serialize(), {
     skipPreflight: false,
   });
   await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight });

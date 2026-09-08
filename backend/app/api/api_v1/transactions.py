@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps import require_wallet_ownership
 from app.db.models import (
     User,
     Agent,
@@ -17,7 +18,11 @@ from app.services.audit_service import (
 )
 from app.services.payment_flow import attempt_execution, transaction_to_dict
 
-router = APIRouter(prefix="/users/{wallet_address}/transactions", tags=["transactions"])
+router = APIRouter(
+    prefix="/users/{wallet_address}/transactions",
+    tags=["transactions"],
+    dependencies=[Depends(require_wallet_ownership)],
+)
 
 
 def _tx_to_out(tx: Transaction) -> TransactionOut:

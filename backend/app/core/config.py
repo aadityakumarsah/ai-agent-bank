@@ -12,6 +12,17 @@ class Settings(BaseSettings):
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
 
+    # Deployment environment: "development" | "test" | "production".
+    # Production enables several guardrails (see verify_production_config and
+    # get_payment_service): fail-fast on missing secrets, no silent mock-mode
+    # fallback, DB auto-create disabled, and payment routes authenticated.
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").strip().lower()
+
+    # When true, wallet-scoped routes verify the caller owns the wallet they
+    # claim (JWT from /auth/verify must match the path/body wallet). Flipped on
+    # in production; off by default so MOCK/demo flow keeps working.
+    REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "false").strip().lower() == "true"
+
     # DEMO MODE: the app must run with zero external keys. When enabled (or left
     # blank) we use the mock AI provider, the demo service marketplace, mock
     # payment (simulated USDC) and deterministic demo tasks. Every simulated
@@ -84,6 +95,44 @@ class Settings(BaseSettings):
         if self.DATABASE_URL:
             return self.DATABASE_URL
         return self.assembled_database_url
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT == "production"
+
+    def verify_production_config(self) -> None:
+        """Fail fast (raise) when a supposedly-production deployment is
+        misconfigured, instead of silently degrading to unsafe behavior.
+
+        Called once at startup. Only enforced when ENVIRONMENT=production so
+        demos and local dev keep working without every secret set.
+        """
+        if not self.is_production:
+            return
+
+        issues: list[str] = []
+
+        if self.SECRET_KEY == "CHANGE_THIS_TO_A_SECRET_KEY_IN_PRODUCTION":
+            issues.append("SECRET_KEY is still the insecure default")
+        if self.DEMO_MODE:
+            issues.append("DEMO_MODE must be false in production")
+        if not self.DATABASE_URL:
+            issues.append("DATABASE_URL must be set to managed Postgres")
+        elif "sqlite" in self.DATABASE_URL:
+            issues.append("DATABASE_URL must not be sqlite in production")
+        if self.USE_REAL_PAYMENT and not self.SOLANA_RPC_URL:
+            issues.append("USE_REAL_PAYMENT=true requires SOLANA_RPC_URL")
+        if self.USE_REAL_PAYMENT and not self.SOLANA_PRIVATE_KEY:
+            issues.append("USE_REAL_PAYMENT=true requires SOLANA_PRIVATE_KEY")
+        if not self.LLM_KEY_ENCRYPTION_KEY:
+            issues.append("LLM_KEY_ENCRYPTION_KEY must be set in production (do not derive from SECRET_KEY)")
+        if self.REDIS_URL == "redis://localhost:6379":
+            issues.append("REDIS_URL must point to managed Redis in production")
+
+        if issues:
+            raise RuntimeError(
+                "Production configuration is invalid:\n  - " + "\n  - ".join(issues)
+            )
 
 
 settings = Settings()

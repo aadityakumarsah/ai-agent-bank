@@ -3,12 +3,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.api.deps import require_wallet_ownership
 from app.db.models import User, Agent, AgentStatus, Transaction, TaskRun
 from app.schemas import TaskCreate, TaskOut, TransactionOut
 from app.services.agent_runtime import agent_runtime
 from app.services.redis_service import redis_client
 
-router = APIRouter(prefix="/users/{wallet_address}/agents/{agent_id}/runs", tags=["agent-runtime"])
+router = APIRouter(
+    prefix="/users/{wallet_address}/agents/{agent_id}/runs",
+    tags=["agent-runtime"],
+    dependencies=[Depends(require_wallet_ownership)],
+)
 
 
 def _tx_to_out(tx: Transaction) -> TransactionOut:

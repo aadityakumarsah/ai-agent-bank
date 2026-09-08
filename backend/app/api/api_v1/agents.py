@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import User, Agent, AgentStatus, Policy
+from app.api.deps import require_wallet_ownership
 from app.schemas import (
     AgentCreate,
     AgentFund,
@@ -16,7 +17,11 @@ from app.schemas import (
 )
 from app.services.payment_service import payment_service
 
-router = APIRouter(prefix="/users/{wallet_address}/agents", tags=["agents"])
+router = APIRouter(
+    prefix="/users/{wallet_address}/agents",
+    tags=["agents"],
+    dependencies=[Depends(require_wallet_ownership)],
+)
 
 
 def _get_user(wallet_address: str, db: Session) -> User:

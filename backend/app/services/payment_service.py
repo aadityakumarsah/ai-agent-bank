@@ -752,7 +752,18 @@ def get_payment_service() -> PaymentService:
             return SolanaPaymentService()
         except ValueError as e:
             logger.warning("Real payment requested but not configured: %s", e)
+            if settings.is_production:
+                # Never silently downgrade real money to mock in production.
+                raise RuntimeError(
+                    "USE_REAL_PAYMENT=true but Solana payment is misconfigured. "
+                    f"{e}"
+                ) from e
             logger.warning("Falling back to MOCK MODE.")
+    elif settings.USE_REAL_PAYMENT and settings.is_production:
+        raise RuntimeError(
+            "USE_REAL_PAYMENT=true in production requires SOLANA_RPC_URL and "
+            "SOLANA_PRIVATE_KEY. Set them or turn USE_REAL_PAYMENT off."
+        )
     return MockPaymentService()
 
 

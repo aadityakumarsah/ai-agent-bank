@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
+from app.api.deps import require_wallet_ownership
 from app.db.models import User, UserAPIKey
 from app.schemas import LLMKeyInput, LLMKeySavedOut, LLMKeyStatusOut
 from app.services.secrets import encrypt_secret
@@ -12,6 +13,7 @@ from app.services.secrets import encrypt_secret
 router = APIRouter(
     prefix="/users/{wallet_address}/llm-keys",
     tags=["llm-keys"],
+    dependencies=[Depends(require_wallet_ownership)],
 )
 
 PROVIDERS = ["openai", "anthropic", "google"]

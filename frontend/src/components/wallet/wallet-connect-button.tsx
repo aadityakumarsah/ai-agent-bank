@@ -1,18 +1,22 @@
 "use client";
 
-import { Wallet, Loader2, Copy, Check, LogOut } from "lucide-react";
+import { Wallet, Loader2, Copy, Check, LogOut, KeyRound, X } from "lucide-react";
 import { useWalletConnection } from "./wallet-context";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { shortAddress } from "@/lib/utils";
 import { getWalletBalances } from "@/lib/solana";
 import { useEffect, useState } from "react";
 
 export function WalletConnectButton({ compact }: { compact?: boolean }) {
-  const { connected, connecting, address, isDemo, connect, disconnect, error } =
+  const { connected, connecting, address, isDemo, connect, connectWithKey, disconnect, error } =
     useWalletConnection();
   const [copied, setCopied] = useState(false);
   const [sol, setSol] = useState<number | null>(null);
   const [usdc, setUsdc] = useState<number | null>(null);
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,18 +42,61 @@ export function WalletConnectButton({ compact }: { compact?: boolean }) {
     };
   }, [connected, address, isDemo]);
 
+  const submitKey = async () => {
+    if (!keyInput.trim()) return;
+    setKeyBusy(true);
+    await connectWithKey(keyInput);
+    setKeyBusy(false);
+    if (connected) {
+      setKeyInput("");
+      setShowKeyInput(false);
+    }
+  };
+
   if (!connected) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col items-end gap-2">
         {error && <span className="text-xs text-destructive">{error}</span>}
-        <Button size={compact ? "sm" : "default"} onClick={connect} disabled={connecting}>
-          {connecting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Wallet className="h-4 w-4" />
-          )}
-          {connecting ? "Connecting…" : compact ? "Connect" : "Connect Wallet"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size={compact ? "sm" : "default"} onClick={connect} disabled={connecting}>
+            {connecting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Wallet className="h-4 w-4" />
+            )}
+            {connecting ? "Connecting…" : compact ? "Connect" : "Connect Wallet"}
+          </Button>
+          <Button
+            size={compact ? "sm" : "default"}
+            variant="outline"
+            onClick={() => setShowKeyInput((v) => !v)}
+            title="Connect using a pasted secret key"
+          >
+            <KeyRound className="h-4 w-4" />
+            {!compact && "Paste Key"}
+          </Button>
+        </div>
+        {showKeyInput && (
+          <div className="flex w-full min-w-[280px] items-center gap-2 rounded-lg border border-border bg-card p-2">
+            <Input
+              type="password"
+              placeholder="base58 secret key"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void submitKey();
+              }}
+              className="h-8 font-mono text-xs"
+              autoFocus
+            />
+            <Button size="sm" onClick={() => void submitKey()} disabled={keyBusy}>
+              {keyBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+            </Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setShowKeyInput(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
     );
   }

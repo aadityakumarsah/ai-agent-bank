@@ -2,6 +2,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -15,6 +16,7 @@ from app.api.api_v1 import (
     config,
     marketplace,
     llm_keys,
+    auth,
 )
 from app.api.errors import install_exception_handlers
 from app.middleware.request_context import RequestContextMiddleware
@@ -54,11 +56,18 @@ def create_app() -> FastAPI:
     app.include_router(config.router, prefix=settings.API_V1_STR)
     app.include_router(marketplace.router, prefix=settings.API_V1_STR)
     app.include_router(llm_keys.router, prefix=settings.API_V1_STR)
+    app.include_router(auth.router, prefix=settings.API_V1_STR)
 
     @app.on_event("startup")
     def on_startup() -> None:
-        # Create tables on startup for dev convenience.
-        # Production uses: alembic upgrade head
+        # Fail fast when a production deployment is misconfigured (never start
+        # a real-money service that silently degraded to demo/sqlite).
+        settings.verify_production_config()
+
+        # Create tables on startup for dev convenience. Production uses
+        # `alembic upgrade head` and never auto-creates tables here.
+        if settings.is_production:
+            return
         try:
             from app.db.session import init_db
 
@@ -76,6 +85,25 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         return {"status": "healthy", "api_version": "0.2.0"}
+
+    @app.get("/health/live")
+    async def liveness():
+        return {"status": "alive", "api_version": "0.2.0"}
+
+    @app.get("/health/ready")
+    async def readiness():
+        """Readiness probe: verifies the database is reachable too."""
+        from sqlalchemy import text
+
+        try:
+            from app.db.session import engine
+
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception as e:  # noqa: BLE001
+            logger.error("readiness probe failed: %s", e)
+            return JSONResponse(status_code=503, content={"status": "not_ready", "database": "unreachable"})
+        return {"status": "ready", "database": "ok"}
 
     return app
 

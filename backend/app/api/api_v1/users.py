@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_wallet_ownership
 from app.db.session import get_db
 from app.db.models import User
 from app.schemas import UserCreate, UserOut
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(require_wallet_ownership)])
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)

@@ -43,6 +43,7 @@ import { TransactionTable } from "@/components/transactions/transaction-table";
 import { ActivityFeed } from "@/components/activity/activity-feed";
 import { transactionToActivity } from "@/lib/activity";
 import { signAndSendUsdcTransfer, explorerUrlForSignature } from "@/lib/solana";
+import type { Keypair } from "@solana/web3.js";
 
 type TabId = "overview" | "wallet" | "policy" | "tasks" | "transactions" | "activity";
 
@@ -56,7 +57,7 @@ const TABS: { value: TabId; label: string }[] = [
 ];
 
 export function AgentDetail({ agentId }: { agentId: number }) {
-  const { address, isDemo } = useWalletConnection();
+  const { address, isDemo, signingKey } = useWalletConnection();
   const { status } = useConfigStatus();
   const router = useRouter();
   const { toast } = useToast();
@@ -269,6 +270,7 @@ export function AgentDetail({ agentId }: { agentId: number }) {
           paymentMode={status?.payment_mode ?? "mock"}
           network={status?.solana_network ?? "devnet"}
           isDemoWallet={isDemo}
+          signingKey={signingKey}
           onFunded={(updated) => setAgent(updated)}
           loading={loading}
         />
@@ -493,6 +495,7 @@ function WalletTab({
   paymentMode,
   network,
   isDemoWallet,
+  signingKey,
   onFunded,
   loading,
 }: {
@@ -502,6 +505,7 @@ function WalletTab({
   paymentMode: "mock" | "real";
   network: string;
   isDemoWallet: boolean;
+  signingKey: Keypair | null;
   onFunded: (a: Agent) => void;
   loading: boolean;
 }) {
@@ -532,6 +536,7 @@ function WalletTab({
           to: req.to_address,
           amount: amt,
           mint: req.mint,
+          keypair: signingKey ?? undefined,
         });
         const updated = await api.confirmFund(address, agent.id, amt, signature);
         onFunded(updated);

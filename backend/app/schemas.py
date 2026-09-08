@@ -14,6 +14,30 @@ class UserOut(BaseModel):
         from_attributes = True
 
 
+class AuthNonceRequest(BaseModel):
+    wallet_address: str = Field(..., description="Solana wallet public key to authenticate")
+
+
+class AuthNonceOut(BaseModel):
+    wallet_address: str
+    nonce: str
+    message: str
+    expires_minutes: int = 10
+
+
+class AuthVerifyRequest(BaseModel):
+    wallet_address: str
+    message: str
+    signature: str = Field(..., description="Wallet signature over the challenge message")
+
+
+class AuthVerifyOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    wallet_address: str
+    expires_minutes: int = 0
+
+
 class PolicyCreate(BaseModel):
     max_per_transaction: float = Field(..., gt=0)
     max_per_day: float = Field(..., gt=0)
