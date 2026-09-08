@@ -9,7 +9,7 @@ import { getWalletBalances } from "@/lib/solana";
 import { useEffect, useState } from "react";
 
 export function WalletConnectButton({ compact }: { compact?: boolean }) {
-  const { connected, connecting, address, walletType, connect, connectWithKey, disconnect, error } =
+  const { connected, address, walletType, openWalletSelect, connectWithKey, disconnect, error } =
     useWalletConnection();
   const [copied, setCopied] = useState(false);
   const [sol, setSol] = useState<number | null>(null);
@@ -58,13 +58,9 @@ export function WalletConnectButton({ compact }: { compact?: boolean }) {
       <div className="flex flex-col items-end gap-2">
         {error && <span className="text-xs text-destructive">{error}</span>}
         <div className="flex items-center gap-2">
-          <Button size={compact ? "sm" : "default"} onClick={connect} disabled={connecting}>
-            {connecting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Wallet className="h-4 w-4" />
-            )}
-            {connecting ? "Connecting…" : compact ? "Connect" : "Connect Wallet"}
+          <Button size={compact ? "sm" : "default"} onClick={() => openWalletSelect()}>
+            <Wallet className="h-4 w-4" />
+            {compact ? "Connect" : "Connect Wallet"}
           </Button>
           <Button
             size={compact ? "sm" : "default"}

@@ -53,7 +53,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function WalletStatus() {
-  const { connected, connecting, address, walletType, connect, disconnect } = useWalletConnection();
+  const { connected, address, walletType, openWalletSelect, disconnect } = useWalletConnection();
   const [copied, setCopied] = useState(false);
 
   const copy = () => {
@@ -66,20 +66,14 @@ function WalletStatus() {
   if (!connected) {
     return (
       <button
-        onClick={connect}
-        disabled={connecting}
+        onClick={() => openWalletSelect()}
         className="flex w-full items-center gap-3 rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-left transition-colors hover:bg-secondary"
       >
         <Wallet className="h-4 w-4 text-muted-foreground" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium leading-tight">
-            {connecting ? "Connecting…" : "Connect wallet"}
-          </div>
+          <div className="text-sm font-medium leading-tight">Connect wallet</div>
           <div className="truncate text-xs text-muted-foreground">Solana</div>
         </div>
-        {connecting && (
-          <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />
-        )}
       </button>
     );
   }

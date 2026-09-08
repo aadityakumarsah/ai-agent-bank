@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { Keypair } from "@solana/web3.js";
+import { WalletSelectModal } from "./wallet-select-modal";
 
 export type WalletType = "Solflare" | "Phantom" | "Imported key" | "Browser wallet";
 
@@ -15,9 +16,17 @@ interface WalletContextValue {
   isDemo: boolean;
   signingKey: Keypair | null;
   connect: () => Promise<void>;
+  connectTo: (name: "Solflare" | "Phantom") => Promise<boolean>;
   connectWithKey: (secretKey: string) => Promise<string | null>;
   disconnect: () => void;
   error: string | null;
+  /** Wallet chooser modal (shown by every "Connect wallet" button). */
+  walletSelectOpen: boolean;
+  openWalletSelect: (onConnected?: () => void) => void;
+  closeWalletSelect: () => void;
+  walletOptions: { name: "Solflare" | "Phantom"; detected: boolean }[];
+  /** Run the "on connected" callback registered when the modal was opened. */
+  onWalletConnected: () => void;
 }
 
 const WalletContext = createContext<WalletContextValue>({
@@ -28,9 +37,18 @@ const WalletContext = createContext<WalletContextValue>({
   isDemo: false,
   signingKey: null,
   connect: async () => {},
+  connectTo: async () => false,
   connectWithKey: async () => null,
   disconnect: () => {},
   error: null,
+  walletSelectOpen: false,
+  openWalletSelect: () => {},
+  closeWalletSelect: () => {},
+  walletOptions: [
+    { name: "Solflare", detected: false },
+    { name: "Phantom", detected: false },
+  ],
+  onWalletConnected: () => {},
 });
 
 export function useWalletConnection() {
@@ -44,6 +62,33 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [signingKey, setSigningKey] = useState<Keypair | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [walletSelectOpen, setWalletSelectOpen] = useState(false);
+  const [walletOptions, setWalletOptions] = useState<
+    { name: "Solflare" | "Phantom"; detected: boolean }[]
+  >([]);
+  const onConnectedRef = useRef<(() => void) | null>(null);
+
+  const openWalletSelect = useCallback((onConnected?: () => void) => {
+    onConnectedRef.current = onConnected ?? null;
+    setError(null);
+    // Detect which extensions are installed so the chooser can badge them.
+    import("@/components/wallet/adapters").then(({ detectWallets }) => {
+      setWalletOptions(detectWallets().map((w) => ({ name: w.name, detected: w.detected })));
+    });
+    setWalletSelectOpen(true);
+  }, []);
+
+  const closeWalletSelect = useCallback(() => {
+    setWalletSelectOpen(false);
+    onConnectedRef.current = null;
+  }, []);
+
+  const onWalletConnected = useCallback(() => {
+    onConnectedRef.current?.();
+    onConnectedRef.current = null;
+    setWalletSelectOpen(false);
+  }, []);
 
   const connect = useCallback(async () => {
     setError(null);
@@ -69,6 +114,35 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setConnecting(false);
     }
   }, []);
+
+  // Connect through a wallet the user explicitly chose in the modal.
+  const connectTo = useCallback(
+    async (name: "Solflare" | "Phantom"): Promise<boolean> => {
+      setError(null);
+      setConnecting(true);
+      setSigningKey(null);
+      try {
+        const { connectTo: runConnect } = await import("@/components/wallet/adapters");
+        const adapter = await runConnect(name);
+        if (!adapter?.publicKey) {
+          setError(
+            `${name} was not detected in this browser. Install the ${name} extension, or pick another wallet.`
+          );
+          return false;
+        }
+        setAddress(adapter.publicKey.toBase58());
+        setWalletType(adapter.providerName as WalletType);
+        setIsDemo(false);
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to connect wallet");
+        return false;
+      } finally {
+        setConnecting(false);
+      }
+    },
+    []
+  );
 
   // Connect by pasting a base58 secret key (no browser extension required).
   // Derives the public address from the key so it must be the user's own wallet.
@@ -124,12 +198,39 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       isDemo,
       signingKey,
       connect,
+      connectTo,
       connectWithKey,
       disconnect,
       error,
+      walletSelectOpen,
+      openWalletSelect,
+      closeWalletSelect,
+      walletOptions,
+      onWalletConnected,
     }),
-    [address, walletType, isDemo, signingKey, connecting, connect, connectWithKey, disconnect, error]
+    [
+      address,
+      walletType,
+      isDemo,
+      signingKey,
+      connecting,
+      connect,
+      connectTo,
+      connectWithKey,
+      disconnect,
+      error,
+      walletSelectOpen,
+      openWalletSelect,
+      closeWalletSelect,
+      walletOptions,
+      onWalletConnected,
+    ]
   );
 
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+  return (
+    <WalletContext.Provider value={value}>
+      {children}
+      <WalletSelectModal />
+    </WalletContext.Provider>
+  );
 }

@@ -233,7 +233,7 @@ function ProviderRow({
 
 export function SettingsPage() {
   const router = useRouter();
-  const { address, isDemo, connected, disconnect, connect } = useWalletConnection();
+  const { address, isDemo, connected, disconnect, openWalletSelect } = useWalletConnection();
   const { status } = useConfigStatus();
   const [copied, setCopied] = useState(false);
 
@@ -257,7 +257,7 @@ export function SettingsPage() {
           {!connected ? (
             <div className="flex flex-col items-start gap-3 py-2">
               <p className="text-sm text-muted-foreground">No wallet connected.</p>
-              <Button onClick={connect}>Connect wallet</Button>
+              <Button onClick={() => openWalletSelect()}>Connect wallet</Button>
             </div>
           ) : (
             <>
@@ -338,7 +338,7 @@ export function SettingsPage() {
                 <p className="text-sm text-muted-foreground">
                   Connect a wallet to manage provider keys for it.
                 </p>
-                <Button onClick={connect}>Connect wallet</Button>
+<Button onClick={() => openWalletSelect()}>Connect wallet</Button>
               </div>
             ) : (
               <LLMKeyManager wallet={address} />

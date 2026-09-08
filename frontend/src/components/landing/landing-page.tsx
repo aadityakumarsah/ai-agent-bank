@@ -1,8 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Loader2, ShieldCheck, Zap, HandCoins, Landmark, ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { ShieldCheck, Zap, HandCoins, Landmark, ArrowRight } from "lucide-react";
 import { useWalletConnection } from "@/components/wallet/wallet-context";
 
 const POLICY_CHIPS = [
@@ -24,17 +23,10 @@ const FLOW = [
 
 export function LandingPage() {
   const router = useRouter();
-  const { connect, connecting } = useWalletConnection();
-  const [launching, setLaunching] = useState(false);
+  const { openWalletSelect } = useWalletConnection();
 
-  const launch = async () => {
-    setLaunching(true);
-    try {
-      await connect();
-      router.push("/dashboard");
-    } finally {
-      setLaunching(false);
-    }
+  const launch = () => {
+    openWalletSelect(() => router.push("/dashboard"));
   };
 
   return (
@@ -51,11 +43,9 @@ export function LandingPage() {
         </div>
         <button
           onClick={launch}
-          disabled={launching || connecting}
-          className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
         >
-          {launching || connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Launch Demo
+          Connect wallet
         </button>
       </header>
 
@@ -77,11 +67,9 @@ export function LandingPage() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <button
               onClick={launch}
-              disabled={launching || connecting}
-              className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-6 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-6 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
-              {launching || connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Launch Demo
+              Connect wallet
             </button>
             <a
               href="#how-it-works"

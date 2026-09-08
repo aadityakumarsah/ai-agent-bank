@@ -1,10 +1,10 @@
 "use client";
 
-import { Wallet, Loader2 } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { useWalletConnection } from "@/components/wallet/wallet-context";
 
 export function ConnectGate({ children }: { children: React.ReactNode }) {
-  const { connected, connect, connecting } = useWalletConnection();
+  const { connected, openWalletSelect } = useWalletConnection();
 
   if (connected) return <>{children}</>;
 
@@ -23,16 +23,11 @@ export function ConnectGate({ children }: { children: React.ReactNode }) {
         </p>
       </div>
       <button
-        onClick={connect}
-        disabled={connecting}
-        className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+        onClick={() => openWalletSelect()}
+        className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
       >
-        {connecting ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Wallet className="h-4 w-4" />
-        )}
-        {connecting ? "Connecting…" : "Connect wallet"}
+        <Wallet className="h-4 w-4" />
+        Connect wallet
       </button>
       <p className="text-xs text-muted-foreground">
         Solflare or Phantom browser extension required to sign real USDC transfers.
