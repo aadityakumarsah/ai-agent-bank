@@ -76,6 +76,8 @@ def transaction_to_dict(tx: Transaction) -> Dict[str, Any]:
         "rejection_reason": tx.rejection_reason,
         "tx_hash": tx.tx_hash,
         "description": tx.description,
+        "risk_score": tx.risk_score if getattr(tx, "risk_score", None) is not None else 0,
+        "risk_level": tx.risk_level if getattr(tx, "risk_level", None) else "low",
         "created_at": tx.created_at.isoformat() if tx.created_at else None,
     }
 

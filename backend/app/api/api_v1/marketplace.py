@@ -304,6 +304,12 @@ def pay_for_service(
 
     checks = [c for c in result.checks]
 
+    # Persist the deterministic risk score onto the ledger row so the
+    # UI/history exposes exactly how risky a payment was judged to be.
+    if result.risk_score is not None:
+        tx.risk_score = result.risk_score
+        tx.risk_level = result.risk_level or "low"
+
     # Approval required (human in the loop) takes precedence over the generic
     # blocked branch — the policy engine reports requires_approval with allowed=False.
     if result.requires_approval:

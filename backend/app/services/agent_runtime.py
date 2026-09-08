@@ -193,6 +193,10 @@ class AgentRuntime:
             transaction_id=tx.id,
         )
 
+        if result.risk_score is not None:
+            tx.risk_score = result.risk_score
+            tx.risk_level = result.risk_level or "low"
+
         self._record_step(
             db,
             run,

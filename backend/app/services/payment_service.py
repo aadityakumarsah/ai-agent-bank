@@ -805,6 +805,13 @@ class SolanaPaymentService(PaymentService):
             err=tx.get("err"),
             slot=tx.get("slot"),
             explorer_url=tx.get("explorer_url"),
+            # Include the parsed on-chain transfer so callers (e.g. confirm_fund)
+            # can verify the real amount/mint/destination instead of trusting any
+            # client-supplied value.
+            amount=tx.get("amount"),
+            mint=tx.get("mint"),
+            source=tx.get("source"),
+            destination=tx.get("destination"),
         )
 
 
