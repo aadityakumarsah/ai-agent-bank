@@ -1,6 +1,14 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Keypair } from "@solana/web3.js";
 import { WalletSelectModal } from "./wallet-select-modal";
 import type { WalletOptionName } from "./adapters";
@@ -52,6 +60,53 @@ const WalletContext = createContext<WalletContextValue>({
   walletDetection: {},
   onWalletConnected: () => {},
 });
+
+// The wallet session (address + type + optional imported secret key) is kept
+// in localStorage so a page refresh restores the connection instead of forcing
+// the user to reconnect. The imported secret key is stored because that mode's
+// whole point is the app holding the key — without it a refresh would lose the
+// ability to sign.
+const SESSION_KEY = "aibank_session";
+
+interface PersistedSession {
+  address: string;
+  walletType: WalletType;
+  importedKey: string | null;
+}
+
+function saveSession(session: PersistedSession): void {
+  try {
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadSession(): PersistedSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedSession>;
+    if (typeof parsed.address !== "string") return null;
+    return {
+      address: parsed.address,
+      walletType: (parsed.walletType as WalletType) ?? "Browser wallet",
+      importedKey: typeof parsed.importedKey === "string" ? parsed.importedKey : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearSession(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function useWalletConnection() {
   return useContext(WalletContext);
@@ -115,6 +170,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setAddress(adapter.publicKey.toBase58());
       setWalletType(adapter.providerName as WalletType);
       setIsDemo(false);
+      saveSession({
+        address: adapter.publicKey.toBase58(),
+        walletType: adapter.providerName as WalletType,
+        importedKey: null,
+      });
       // Establish server-side identity: nonce -> sign -> JWT (Bearer token).
       const { authenticateWallet } = await import("@/lib/auth");
       const outcome = await authenticateWallet(adapter);
@@ -156,6 +216,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         setAddress(outcome.wallet.publicKey.toBase58());
         setWalletType(outcome.wallet.providerName as WalletType);
         setIsDemo(false);
+        saveSession({
+          address: outcome.wallet.publicKey.toBase58(),
+          walletType: outcome.wallet.providerName as WalletType,
+          importedKey: null,
+        });
         // Establish server-side identity so REQUIRE_AUTH routes authenticate.
         const { authenticateWallet } = await import("@/lib/auth");
         const authorized = await authenticateWallet(outcome.wallet);
@@ -198,6 +263,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setAddress(kp.publicKey.toBase58());
       setWalletType("Imported key");
       setIsDemo(false);
+      const keyAddress = kp.publicKey.toBase58();
+      saveSession({ address: keyAddress, walletType: "Imported key", importedKey: trimmed });
       // Sign the auth nonce with the imported key directly (no wallet popup).
       const { authenticateWithKeypair } = await import("@/lib/auth");
       const outcome = await authenticateWithKeypair(kp);
@@ -205,7 +272,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         setError(outcome.error);
         return null;
       }
-      return kp.publicKey.toBase58();
+      return keyAddress;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid secret key.");
       return null;
@@ -221,12 +288,67 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
     const { clearAuthToken } = await import("@/lib/auth");
     clearAuthToken();
+    clearSession();
     setAddress(null);
     setWalletType(null);
     setIsDemo(false);
     setSigningKey(null);
     setError(null);
   }, []);
+
+  // On page load, restore a previously saved wallet session so a refresh does
+  // not force the user to reconnect. The JWT (8-day expiry) is reused silently;
+  // a keypair session re-derives the key and issues a fresh token locally.
+  const restoreSession = useCallback(async () => {
+    const saved = loadSession();
+    if (!saved) return;
+
+    if (saved.importedKey) {
+      try {
+        const [{ Keypair: SolKeypair }, { default: bs58 }] = await Promise.all([
+          import("@solana/web3.js"),
+          import("bs58"),
+        ]);
+        const kp = SolKeypair.fromSecretKey(bs58.decode(saved.importedKey));
+        if (kp.publicKey.toBase58() !== saved.address) {
+          clearSession();
+          return;
+        }
+        setSigningKey(kp);
+        setAddress(saved.address);
+        setWalletType(saved.walletType);
+        setIsDemo(false);
+        const { authenticateWithKeypair } = await import("@/lib/auth");
+        const outcome = await authenticateWithKeypair(kp);
+        if (!outcome.ok && outcome.error) setError(outcome.error);
+      } catch {
+        setError("Couldn't restore your imported wallet session.");
+        clearSession();
+      }
+      return;
+    }
+
+    setAddress(saved.address);
+    setWalletType(saved.walletType);
+    setIsDemo(false);
+    const { getAuthToken } = await import("@/lib/auth");
+    if (getAuthToken()) return;
+    try {
+      const { tryConnect } = await import("@/components/wallet/adapters");
+      const adapter = await tryConnect();
+      if (adapter?.publicKey?.toBase58() === saved.address) {
+        const { authenticateWallet } = await import("@/lib/auth");
+        const outcome = await authenticateWallet(adapter);
+        if (!outcome.ok && outcome.error) setError(outcome.error);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void restoreSession();
+  }, [restoreSession]);
 
   const value = useMemo(
     () => ({
