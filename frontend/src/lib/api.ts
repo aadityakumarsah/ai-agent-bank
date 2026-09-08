@@ -14,15 +14,15 @@ import type {
   TaskRunResult,
   Transaction,
 } from "@/lib/types";
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const API_V1 = "/api/v1";
+import { getAuthToken } from "@/lib/auth";
+import { API_BASE, API_V1 } from "@/lib/api-config";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken();
   const res = await fetch(`${API_BASE}${API_V1}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers || {}),
     },
     ...options,
@@ -46,6 +46,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   // Config / status
   getStatus: () => request<ConfigStatus>("/status"),
+
+  // Wallet auth (nonce -> signed message -> JWT)
+  authNonce: (walletAddress: string) =>
+    request<{ wallet_address: string; nonce: string; message: string }>("/auth/nonce", {
+      method: "POST",
+      body: JSON.stringify({ wallet_address: walletAddress }),
+    }),
+  authVerify: (walletAddress: string, message: string, signature: string) =>
+    request<{ access_token: string; token_type: string; wallet_address: string }>(
+      "/auth/verify",
+      {
+        method: "POST",
+        body: JSON.stringify({ wallet_address: walletAddress, message, signature }),
+      }
+    ),
 
   // Users
   ensureUser: (walletAddress: string) =>

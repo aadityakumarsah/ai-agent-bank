@@ -115,6 +115,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setAddress(adapter.publicKey.toBase58());
       setWalletType(adapter.providerName as WalletType);
       setIsDemo(false);
+      // Establish server-side identity: nonce -> sign -> JWT (Bearer token).
+      const { authenticateWallet } = await import("@/lib/auth");
+      const outcome = await authenticateWallet(adapter);
+      if (!outcome.ok && outcome.error) {
+        setError(outcome.error);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet");
     } finally {
@@ -150,6 +156,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         setAddress(outcome.wallet.publicKey.toBase58());
         setWalletType(outcome.wallet.providerName as WalletType);
         setIsDemo(false);
+        // Establish server-side identity so REQUIRE_AUTH routes authenticate.
+        const { authenticateWallet } = await import("@/lib/auth");
+        const authorized = await authenticateWallet(outcome.wallet);
+        if (!authorized.ok && authorized.error) {
+          setError(authorized.error);
+          return false;
+        }
         return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to connect wallet");
@@ -185,6 +198,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setAddress(kp.publicKey.toBase58());
       setWalletType("Imported key");
       setIsDemo(false);
+      // Sign the auth nonce with the imported key directly (no wallet popup).
+      const { authenticateWithKeypair } = await import("@/lib/auth");
+      const outcome = await authenticateWithKeypair(kp);
+      if (!outcome.ok && outcome.error) {
+        setError(outcome.error);
+        return null;
+      }
       return kp.publicKey.toBase58();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid secret key.");
@@ -199,6 +219,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     } catch {
       /* ignore */
     }
+    const { clearAuthToken } = await import("@/lib/auth");
+    clearAuthToken();
     setAddress(null);
     setWalletType(null);
     setIsDemo(false);

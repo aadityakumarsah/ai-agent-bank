@@ -2,6 +2,11 @@ export interface ConnectedWallet {
   publicKey: { toBase58(): string };
   /** Human-readable wallet type, e.g. "Solflare", "Phantom" or "Browser wallet". */
   providerName: string;
+  /**
+   * Sign arbitrary bytes via the wallet extension (used for the auth nonce).
+   * Resolves to the raw signature bytes.
+   */
+  signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
 }
 
 type WalletProvider = {
@@ -174,16 +179,29 @@ function publicKeyOf(res: unknown): { toBase58(): string } | null {
   return null;
 }
 
+function signMessageFrom(provider: WalletProvider) {
+  const p = provider as unknown as {
+    signMessage?: (msg: Uint8Array) => Promise<Uint8Array | { signature: Uint8Array }>;
+  };
+  if (typeof p?.signMessage !== "function") return undefined;
+  return async (message: Uint8Array): Promise<Uint8Array> => {
+    const res = await p.signMessage!(message);
+    const sig = (res as { signature?: Uint8Array }).signature ?? res;
+    return sig as Uint8Array;
+  };
+}
+
 async function runConnect(
   provider: WalletProvider,
   fallbackName: string
 ): Promise<WalletConnectOutcome> {
   const actual = nameOf(provider);
   const providerName = actual === "Browser wallet" ? fallbackName : actual;
+  const signMessage = signMessageFrom(provider);
   try {
     const res = await provider.connect();
     const pk = publicKeyOf(res);
-    if (pk) return { ok: true, wallet: { publicKey: pk, providerName } };
+    if (pk) return { ok: true, wallet: { publicKey: pk, providerName, signMessage } };
   } catch {
     // Fall through to already-connected recovery.
   }
@@ -193,7 +211,7 @@ async function runConnect(
   try {
     const existing = publicKeyOf((provider as unknown as { publicKey?: unknown }).publicKey);
     if (existing) {
-      return { ok: true, wallet: { publicKey: existing, providerName } };
+      return { ok: true, wallet: { publicKey: existing, providerName, signMessage } };
     }
   } catch {
     /* ignore */
