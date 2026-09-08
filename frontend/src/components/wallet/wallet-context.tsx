@@ -73,9 +73,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     onConnectedRef.current = onConnected ?? null;
     setError(null);
     // Detect which extensions are installed so the chooser can badge them.
-    import("@/components/wallet/adapters").then(({ detectWallets }) => {
-      setWalletOptions(detectWallets().map((w) => ({ name: w.name, detected: w.detected })));
-    });
+    // detectWallets() polls briefly because extensions inject after load.
+    import("@/components/wallet/adapters")
+      .then(({ detectWallets }) => detectWallets())
+      .then((wallets) => {
+        setWalletOptions(wallets.map((w) => ({ name: w.name, detected: w.detected })));
+      });
     setWalletSelectOpen(true);
   }, []);
 

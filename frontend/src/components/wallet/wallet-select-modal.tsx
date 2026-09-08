@@ -159,6 +159,12 @@ export function WalletSelectModal() {
             </div>
           </div>
         )}
+
+        <p className="text-center text-[11px] text-muted-foreground">
+          Picking a wallet opens its own approval popup — approve the connection
+          there (just like signing in with Google or MetaMask). We only receive
+          your public address, never your keys.
+        </p>
       </div>
     </Dialog>
   );
