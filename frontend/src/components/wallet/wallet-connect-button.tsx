@@ -60,7 +60,7 @@ export function WalletConnectButton({ compact }: { compact?: boolean }) {
         <div className="flex items-center gap-2">
           <Button size={compact ? "sm" : "default"} onClick={() => openWalletSelect()}>
             <Wallet className="h-4 w-4" />
-            {compact ? "Connect" : "Connect Wallet"}
+            {compact ? "Select Wallet" : "Select Wallet"}
           </Button>
           <Button
             size={compact ? "sm" : "default"}

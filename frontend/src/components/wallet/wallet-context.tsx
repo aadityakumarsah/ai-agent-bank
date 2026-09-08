@@ -3,8 +3,12 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { Keypair } from "@solana/web3.js";
 import { WalletSelectModal } from "./wallet-select-modal";
+import type { WalletOptionName } from "./adapters";
 
-export type WalletType = "Solflare" | "Phantom" | "Imported key" | "Browser wallet";
+export type WalletType =
+  | WalletOptionName
+  | "Imported key"
+  | "Browser wallet";
 
 interface WalletContextValue {
   connected: boolean;
@@ -16,7 +20,7 @@ interface WalletContextValue {
   isDemo: boolean;
   signingKey: Keypair | null;
   connect: () => Promise<void>;
-  connectTo: (name: "Solflare" | "Phantom") => Promise<boolean>;
+  connectTo: (name: WalletOptionName) => Promise<boolean>;
   connectWithKey: (secretKey: string) => Promise<string | null>;
   disconnect: () => void;
   error: string | null;
@@ -24,7 +28,8 @@ interface WalletContextValue {
   walletSelectOpen: boolean;
   openWalletSelect: (onConnected?: () => void) => void;
   closeWalletSelect: () => void;
-  walletOptions: { name: "Solflare" | "Phantom"; detected: boolean }[];
+  /** Availability of each wallet extension, shown as "Detected" badges. */
+  walletDetection: Partial<Record<WalletOptionName, boolean>>;
   /** Run the "on connected" callback registered when the modal was opened. */
   onWalletConnected: () => void;
 }
@@ -44,10 +49,7 @@ const WalletContext = createContext<WalletContextValue>({
   walletSelectOpen: false,
   openWalletSelect: () => {},
   closeWalletSelect: () => {},
-  walletOptions: [
-    { name: "Solflare", detected: false },
-    { name: "Phantom", detected: false },
-  ],
+  walletDetection: {},
   onWalletConnected: () => {},
 });
 
@@ -64,9 +66,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const [walletSelectOpen, setWalletSelectOpen] = useState(false);
-  const [walletOptions, setWalletOptions] = useState<
-    { name: "Solflare" | "Phantom"; detected: boolean }[]
-  >([]);
+  const [walletDetection, setWalletDetection] = useState<
+    Partial<Record<WalletOptionName, boolean>>
+  >({});
   const onConnectedRef = useRef<(() => void) | null>(null);
 
   const openWalletSelect = useCallback((onConnected?: () => void) => {
@@ -77,7 +79,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     import("@/components/wallet/adapters")
       .then(({ detectWallets }) => detectWallets())
       .then((wallets) => {
-        setWalletOptions(wallets.map((w) => ({ name: w.name, detected: w.detected })));
+        setWalletDetection(
+          Object.fromEntries(wallets.map((w) => [w.name, w.detected]))
+        );
       });
     setWalletSelectOpen(true);
   }, []);
@@ -120,7 +124,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   // Connect through a wallet the user explicitly chose in the modal.
   const connectTo = useCallback(
-    async (name: "Solflare" | "Phantom"): Promise<boolean> => {
+    async (name: WalletOptionName): Promise<boolean> => {
       setError(null);
       setConnecting(true);
       setSigningKey(null);
@@ -208,7 +212,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       walletSelectOpen,
       openWalletSelect,
       closeWalletSelect,
-      walletOptions,
+      walletDetection,
       onWalletConnected,
     }),
     [
@@ -225,7 +229,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       walletSelectOpen,
       openWalletSelect,
       closeWalletSelect,
-      walletOptions,
+      walletDetection,
       onWalletConnected,
     ]
   );

@@ -7,10 +7,17 @@ export interface ConnectedWallet {
 type WalletProvider = {
   isPhantom?: boolean;
   isSolflare?: boolean;
+  isBackpack?: boolean;
+  isCoinbaseWallet?: boolean;
   connect: () => Promise<{ publicKey: { toBase58(): string } | undefined }>;
 };
 
-export type WalletOptionName = "Solflare" | "Phantom";
+export type WalletOptionName =
+  | "Solflare"
+  | "Phantom"
+  | "Backpack"
+  | "Coinbase Wallet"
+  | "Ledger";
 
 interface DetectedWallet {
   name: WalletOptionName;
@@ -20,6 +27,8 @@ interface DetectedWallet {
 
 const SOLFLARE_PROVIDER = "solflare";
 const PHANTOM_PROVIDER = "phantom";
+const BACKPACK_PROVIDER = "backpack";
+const COINBASE_PROVIDER = "coinbaseSolana";
 
 function providerFromGlobal(key: string): WalletProvider | null {
   const w = window as unknown as Record<string, unknown>;
@@ -57,10 +66,12 @@ async function waitForGlobal(
 function nameOf(provider: WalletProvider): string {
   if (provider.isPhantom === true) return "Phantom";
   if (provider.isSolflare === true) return "Solflare";
+  if (provider.isBackpack === true) return "Backpack";
+  if (provider.isCoinbaseWallet === true) return "Coinbase Wallet";
   return "Browser wallet";
 }
 
-function solflareCandidates(): WalletProvider | null {
+function readSolflare(): WalletProvider | null {
   return (
     providerFromGlobal(SOLFLARE_PROVIDER) ??
     (providerFromGlobal("solana")?.isSolflare === true
@@ -69,15 +80,60 @@ function solflareCandidates(): WalletProvider | null {
   );
 }
 
-function phantomCandidates(): WalletProvider | null {
-  const phantom = providerFromGlobal(PHANTOM_PROVIDER);
-  const phantomSolana = providerFromGlobal("phantom") as WalletProvider | null;
+function providerFromNested(key: string, subkey: string): WalletProvider | null {
+  const w = window as unknown as Record<string, Record<string, unknown> | undefined>;
+  const candidate = w[key]?.[subkey] as WalletProvider | undefined;
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.connect === "function"
+  ) {
+    return candidate;
+  }
+  return null;
+}
+
+function readPhantom(): WalletProvider | null {
+  const direct = providerFromGlobal(PHANTOM_PROVIDER);
+  const nested = providerFromNested(PHANTOM_PROVIDER, "solana");
   const solana = providerFromGlobal("solana");
-  if (phantom && phantom.isPhantom !== false) return phantom;
-  // Newer Phantom versions expose window.phantom.solana.
-  if (phantomSolana && typeof phantomSolana.connect === "function") return phantomSolana;
+  if (direct && direct.isPhantom !== false) return direct;
+  if (nested) return nested;
   if (solana && solana.isPhantom === true) return solana;
   return null;
+}
+
+function readBackpack(): WalletProvider | null {
+  const direct = providerFromGlobal(BACKPACK_PROVIDER);
+  const solana = providerFromGlobal("solana");
+  if (direct && direct.isBackpack !== false) return direct;
+  if (solana && solana.isBackpack === true) return solana;
+  return null;
+}
+
+function readCoinbase(): WalletProvider | null {
+  const direct = providerFromGlobal(COINBASE_PROVIDER);
+  const solana = providerFromGlobal("solana");
+  if (direct && direct.isCoinbaseWallet !== false) return direct;
+  if (solana && solana.isCoinbaseWallet === true) return solana;
+  return null;
+}
+
+function providerFor(name: WalletOptionName): (() => WalletProvider | null) | null {
+  switch (name) {
+    case "Solflare":
+      return readSolflare;
+    case "Phantom":
+      return readPhantom;
+    case "Backpack":
+      return readBackpack;
+    case "Coinbase Wallet":
+      return readCoinbase;
+    case "Ledger":
+      // Ledger has no injected browser provider; it is hardware-only (via a
+      // wallet adapter / Solflare). Always reported as not detected.
+      return null;
+  }
 }
 
 /**
@@ -86,19 +142,46 @@ function phantomCandidates(): WalletProvider | null {
  * auto-picking one. Waits for delayed injection before reporting absence.
  */
 export async function detectWallets(): Promise<DetectedWallet[]> {
-  const solflare = await waitForGlobal(solflareCandidates);
-  const phantom = await waitForGlobal(phantomCandidates);
-  return [
-    { name: "Solflare", detected: !!solflare, provider: solflare },
-    { name: "Phantom", detected: !!phantom, provider: phantom },
+  const names: WalletOptionName[] = [
+    "Solflare",
+    "Phantom",
+    "Backpack",
+    "Coinbase Wallet",
+    "Ledger",
   ];
+  const results = await Promise.all(
+    names.map(async (name) => {
+      const read = providerFor(name);
+      const provider = read ? await waitForGlobal(read) : null;
+      return { name, detected: !!provider, provider };
+    })
+  );
+  return results;
+}
+
+async function runConnect(
+  provider: WalletProvider,
+  fallbackName: string
+): Promise<ConnectedWallet | null> {
+  try {
+    const res = await provider.connect();
+    if (!res?.publicKey) return null;
+    const actual = nameOf(provider);
+    return {
+      publicKey: res.publicKey,
+      providerName: actual === "Browser wallet" ? fallbackName : actual,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Connect through a specific wallet extension chosen by the user. */
 export async function connectTo(name: WalletOptionName): Promise<ConnectedWallet | null> {
   // Poll for the specific extension first.
-  const wallet = (await detectWallets()).find((w) => w.name === name);
-  const picked = wallet?.detected ? wallet.provider : null;
+  const read = providerFor(name);
+  if (!read) return null; // e.g. Ledger — not connectable via injection
+  const picked = await waitForGlobal(read, 3000);
   if (picked) {
     return runConnect(picked, name);
   }
@@ -113,20 +196,6 @@ export async function connectTo(name: WalletOptionName): Promise<ConnectedWallet
   return null;
 }
 
-async function runConnect(
-  provider: WalletProvider,
-  fallbackName: string
-): Promise<ConnectedWallet | null> {
-  try {
-    const res = await provider.connect();
-    if (!res?.publicKey) return null;
-    const actual = nameOf(provider);
-    return { publicKey: res.publicKey, providerName: actual === "Browser wallet" ? fallbackName : actual };
-  } catch {
-    return null;
-  }
-}
-
 export async function tryConnect(): Promise<ConnectedWallet | null> {
   const wallets = await detectWallets();
   const first = wallets.find((w) => w.detected);
@@ -139,7 +208,14 @@ export async function tryConnect(): Promise<ConnectedWallet | null> {
 }
 
 export async function tryDisconnect(): Promise<void> {
-  for (const key of [SOLFLARE_PROVIDER, PHANTOM_PROVIDER, "solana", "phantom"]) {
+  for (const key of [
+    SOLFLARE_PROVIDER,
+    PHANTOM_PROVIDER,
+    BACKPACK_PROVIDER,
+    COINBASE_PROVIDER,
+    "solana",
+    "phantom",
+  ]) {
     const provider = providerFromGlobal(key) as
       | (WalletProvider & { disconnect?: () => unknown })
       | null;
