@@ -159,29 +159,58 @@ export async function detectWallets(): Promise<DetectedWallet[]> {
   return results;
 }
 
+export type WalletConnectOutcome =
+  | { ok: true; wallet: ConnectedWallet }
+  | { ok: false; reason: "not_detected" | "failed" };
+
+/** Accept either `{ publicKey }` or a raw PublicKey returned by a provider. */
+function publicKeyOf(res: unknown): { toBase58(): string } | null {
+  if (!res) return null;
+  const wrapped = (res as { publicKey?: unknown }).publicKey;
+  const pk = wrapped ?? res;
+  if (pk && typeof (pk as { toBase58?: unknown }).toBase58 === "function") {
+    return pk as { toBase58(): string };
+  }
+  return null;
+}
+
 async function runConnect(
   provider: WalletProvider,
   fallbackName: string
-): Promise<ConnectedWallet | null> {
+): Promise<WalletConnectOutcome> {
+  const actual = nameOf(provider);
+  const providerName = actual === "Browser wallet" ? fallbackName : actual;
   try {
     const res = await provider.connect();
-    if (!res?.publicKey) return null;
-    const actual = nameOf(provider);
-    return {
-      publicKey: res.publicKey,
-      providerName: actual === "Browser wallet" ? fallbackName : actual,
-    };
+    const pk = publicKeyOf(res);
+    if (pk) return { ok: true, wallet: { publicKey: pk, providerName } };
   } catch {
-    return null;
+    // Fall through to already-connected recovery.
   }
+  // Some providers reject `connect()` when the site is already authorized or
+  // the user already connected earlier. Surface the existing session instead
+  // of reporting a phantom "not detected".
+  try {
+    const existing = publicKeyOf((provider as unknown as { publicKey?: unknown }).publicKey);
+    if (existing) {
+      return { ok: true, wallet: { publicKey: existing, providerName } };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { ok: false, reason: "failed" };
 }
 
-/** Connect through a specific wallet extension chosen by the user. */
-export async function connectTo(name: WalletOptionName): Promise<ConnectedWallet | null> {
-  // Poll for the specific extension first.
+/**
+ * Connect through a specific wallet extension chosen by the user.
+ * `not_detected` = the provider is genuinely absent from the page; `failed` =
+ * it is present but the connection itself was rejected/errored.
+ */
+export async function connectTo(name: WalletOptionName): Promise<WalletConnectOutcome> {
+  // Poll for the specific extension first (extensions inject after load).
   const read = providerFor(name);
-  if (!read) return null; // e.g. Ledger — not connectable via injection
-  const picked = await waitForGlobal(read, 3000);
+  if (!read) return { ok: false, reason: "not_detected" }; // e.g. Ledger
+  const picked = await waitForGlobal(read, 4000);
   if (picked) {
     return runConnect(picked, name);
   }
@@ -189,22 +218,24 @@ export async function connectTo(name: WalletOptionName): Promise<ConnectedWallet
   // Fallback: any injected Solana provider works for connecting. This keeps
   // the flow working when the extension injects late or only into
   // window.solana without a reliable flag.
-  const generic = await waitForGlobal(() => providerFromGlobal("solana"), 1500);
+  const generic = await waitForGlobal(() => providerFromGlobal("solana"), 2000);
   if (generic) {
     return runConnect(generic, nameOf(generic));
   }
-  return null;
+  return { ok: false, reason: "not_detected" };
 }
 
 export async function tryConnect(): Promise<ConnectedWallet | null> {
   const wallets = await detectWallets();
   const first = wallets.find((w) => w.detected);
   const picked = first?.provider ?? null;
-  if (!picked) {
-    const generic = await waitForGlobal(() => providerFromGlobal("solana"), 1500);
-    return generic ? runConnect(generic, "Browser wallet") : null;
+  if (picked) {
+    const out = await runConnect(picked, first!.name);
+    if (out.ok) return out.wallet;
   }
-  return runConnect(picked, first!.name);
+  const generic = await waitForGlobal(() => providerFromGlobal("solana"), 2000);
+  const out = generic ? await runConnect(generic, "Browser wallet") : null;
+  return out?.ok ? out.wallet : null;
 }
 
 export async function tryDisconnect(): Promise<void> {

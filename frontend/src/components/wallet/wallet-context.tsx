@@ -130,15 +130,25 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setSigningKey(null);
       try {
         const { connectTo: runConnect } = await import("@/components/wallet/adapters");
-        const adapter = await runConnect(name);
-        if (!adapter?.publicKey) {
-          setError(
-            `${name} was not detected in this browser. Install the ${name} extension, or pick another wallet.`
-          );
+        const outcome = await runConnect(name);
+        if (!outcome.ok) {
+          if (outcome.reason === "not_detected") {
+            setError(
+              `${name} wasn't detected on this page. Make sure the ${name} extension is installed and enabled, then reload this page and try again.`
+            );
+          } else {
+            setError(
+              `Couldn't connect to ${name}. If a ${name} popup appeared, approve it — or if you've already connected before, disconnect and reconnect.`
+            );
+          }
           return false;
         }
-        setAddress(adapter.publicKey.toBase58());
-        setWalletType(adapter.providerName as WalletType);
+        if (!outcome.wallet?.publicKey) {
+          setError(`Couldn't connect to ${name}.`);
+          return false;
+        }
+        setAddress(outcome.wallet.publicKey.toBase58());
+        setWalletType(outcome.wallet.providerName as WalletType);
         setIsDemo(false);
         return true;
       } catch (e) {
