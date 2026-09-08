@@ -15,6 +15,8 @@ from app.db.models import (
     AgentStatus,
     TransactionLog,
 )
+from app.services.risk_engine import risk_engine
+from app.services.trust_registry import trust_registry
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +28,17 @@ class PolicyEvaluationResult:
         reason: str = "",
         checks: Optional[List[Dict[str, Any]]] = None,
         requires_approval: bool = False,
+        risk_score: Optional[int] = None,
+        risk_level: Optional[str] = None,
+        risk_factors: Optional[List[Dict[str, Any]]] = None,
     ):
         self.allowed = allowed
         self.reason = reason
         self.checks = checks or []
         self.requires_approval = requires_approval
+        self.risk_score = risk_score
+        self.risk_level = risk_level
+        self.risk_factors = risk_factors or []
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -38,6 +46,11 @@ class PolicyEvaluationResult:
             "reason": self.reason,
             "requires_approval": self.requires_approval,
             "checks": self.checks,
+            "risk": {
+                "score": self.risk_score,
+                "level": self.risk_level,
+                "factors": self.risk_factors,
+            },
         }
 
 
@@ -116,6 +129,26 @@ class PolicyEngine:
         """Sum of executed transactions for this agent over the last 30 days."""
         since = datetime.now(timezone.utc) - timedelta(days=30)
         return self._sum_executed(db, agent_id, since)
+
+    def _agent_age_hours(self, agent: Agent) -> float:
+        if agent.created_at is None:
+            return 24 * 365
+        created = agent.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - created).total_seconds() / 3600.0)
+
+    def _velocity(self, db: Session, agent_id: int) -> int:
+        """Number of transactions submitted by this agent in the last hour."""
+        since = datetime.now(timezone.utc) - timedelta(hours=1)
+        return int(
+            db.query(Transaction)
+            .filter(
+                Transaction.agent_id == agent_id,
+                Transaction.created_at >= since,
+            )
+            .count()
+        )
 
     def _log(
         self, db: Session, transaction_id: int, level: str, message: str
@@ -293,6 +326,10 @@ class PolicyEngine:
                     known_provider = info
                     break
 
+        recipient_trusted = (known_provider is not None) or (recipient_address in whitelist)
+        registry_entry = trust_registry.lookup(recipient_address)
+        merchant_known = bool(registry_entry.get("trusted")) or recipient_trusted
+
         # For demo/real: addresses are pseudonymous; we can't cryptographically
         # determine 'human' vs 'agent' yet, so we enforce:
         #   - blocked_human_transfers: if the recipient is NOT in the whitelist nor
@@ -358,14 +395,53 @@ class PolicyEngine:
                     }
                 )
 
+        # --- Check 10: Deterministic risk score ---
+        # The policy engine gates, and the risk engine scores. A HIGH risk
+        # transaction is pushed into human-approval rather than auto-executed.
+        risk = risk_engine.compute(
+            amount=float(amount_dec),
+            recipient_known=recipient_trusted,
+            merchant_known=merchant_known,
+            category_allowed=True,
+            contract_allowed=not bool(policy.blocked_arbitrary_contracts),
+            agent_age_hours=self._agent_age_hours(agent),
+            daily_limit=float(max_per_day),
+            spent_today=float(daily_spent),
+            velocity=self._velocity(db, agent.id),
+            policy_violation_count=int(getattr(agent, "violation_count", 0) or 0),
+        )
+        risk_dict = risk.to_dict()
+        risk_checks = {
+            "name": "Risk score",
+            "passed": risk.level != "high",
+            "score": risk.score,
+            "level": risk.level,
+            "factors": risk_dict["factors"],
+        }
+        checks.append(risk_checks)
+
+        if risk.level == "high" and not requires_approval:
+            requires_approval = True
+            checks.append(
+                {
+                    "name": "Risk approval threshold",
+                    "passed": False,
+                    "score": risk.score,
+                    "detail": "High-risk transaction requires human approval",
+                }
+            )
+
         if transaction_id:
             self._log(db, transaction_id, "info", "APPROVED: All policy checks passed")
 
         return PolicyEvaluationResult(
-            allowed=True,
-            reason="All policy checks passed.",
+            allowed=requires_approval is False,
+            reason="All policy checks passed." if not requires_approval else "Transaction requires human approval (policy or risk threshold).",
             checks=checks,
             requires_approval=requires_approval,
+            risk_score=risk.score,
+            risk_level=risk.level,
+            risk_factors=risk_dict["factors"],
         )
 
 

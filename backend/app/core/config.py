@@ -116,10 +116,14 @@ class Settings(BaseSettings):
             issues.append("SECRET_KEY is still the insecure default")
         if self.DEMO_MODE:
             issues.append("DEMO_MODE must be false in production")
+        if not self.REQUIRE_AUTH:
+            issues.append("REQUIRE_AUTH must be true in production (wallet-ownership auth is mandatory)")
         if not self.DATABASE_URL:
             issues.append("DATABASE_URL must be set to managed Postgres")
         elif "sqlite" in self.DATABASE_URL:
             issues.append("DATABASE_URL must not be sqlite in production")
+        if not self.USE_REAL_PAYMENT:
+            issues.append("USE_REAL_PAYMENT must be true in production (mock payment layer is never allowed)")
         if self.USE_REAL_PAYMENT and not self.SOLANA_RPC_URL:
             issues.append("USE_REAL_PAYMENT=true requires SOLANA_RPC_URL")
         if self.USE_REAL_PAYMENT and not self.SOLANA_PRIVATE_KEY:

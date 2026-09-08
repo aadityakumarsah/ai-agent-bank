@@ -22,7 +22,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+
+from app.api import deps as auth_deps
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.limiter import RateLimiter
@@ -80,6 +84,34 @@ def _get_agent(db: Session, agent_id: int) -> Agent:
     if agent.status != AgentStatus.active:
         raise HTTPException(status_code=400, detail=f"Agent is {agent.status.value}")
     return agent
+
+
+def _require_agent_owner(
+    authorization: Optional[str],
+    db: Session,
+    agent_id: int,
+) -> str:
+    """Bind a marketplace agent-spend call to the agent's authenticated owner.
+
+    Closes the cross-tenant IDOR (was: any caller who knew an ``agent_id`` could
+    drain an agent that only had to be ``active``). When ``REQUIRE_AUTH`` is on,
+    the caller must present a Bearer token for the wallet that owns the agent.
+    The ``_get_agent`` active + owner-active checks still apply for the policy
+    gate; this is the authorization gate.
+    """
+    owner_wallet = auth_deps.get_authenticated_wallet(authorization)
+    if not owner_wallet:
+        return ""  # auth off (staging/demo)
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    owner = agent.user
+    if owner is None or owner.wallet_address != owner_wallet:
+        raise HTTPException(
+            status_code=403,
+            detail="This agent does not belong to the authenticated wallet.",
+        )
+    return owner_wallet
 
 
 def _get_service(db: Session, service_id: int) -> ServiceDirectory:
@@ -154,7 +186,10 @@ def get_service(service_id: int, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 @router.post("/{service_id}/request")
 def request_service(
-    service_id: int, payload: ServiceRequestIn, db: Session = Depends(get_db)
+    service_id: int,
+    payload: ServiceRequestIn,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
 ):
     """
     Agent requests a service. This is step 1 of the x402-style flow.
@@ -168,6 +203,7 @@ def request_service(
     demo returns a JSON body with ``payment_required=true`` instead, and is NOT
     wire-compatible with x402. See the module docstring.
     """
+    _require_agent_owner(authorization, db, payload.agent_id)
     _get_agent(db, payload.agent_id)  # ensure agent exists + is active
     service = _get_service(db, service_id)
 
@@ -222,6 +258,7 @@ def pay_for_service(
     payload: ServicePaymentIn,
     db: Session = Depends(get_db),
     _: None = Depends(payment_limiter),
+    authorization: Optional[str] = Header(None),
 ):
     """
     Agent Bank settles the payment for a paid service request.
@@ -233,6 +270,7 @@ def pay_for_service(
     Idempotent: repeating the same (agent, service, amount) payment returns the
     existing result and NEVER double-pays.
     """
+    _require_agent_owner(authorization, db, payload.agent_id)
     agent = _get_agent(db, payload.agent_id)
     service = _get_service(db, service_id)
 
@@ -382,9 +420,13 @@ def _outcome_for_existing_tx(
 # ---------------------------------------------------------------------------
 @router.post("/{service_id}/result")
 def get_service_result(
-    service_id: int, payload: ServiceRunIn, db: Session = Depends(get_db)
+    service_id: int,
+    payload: ServiceRunIn,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
 ):
     """Agent retries a paid service with its payment proof and gets the result."""
+    _require_agent_owner(authorization, db, payload.agent_id)
     agent = _get_agent(db, payload.agent_id)
     service = _get_service(db, service_id)
 

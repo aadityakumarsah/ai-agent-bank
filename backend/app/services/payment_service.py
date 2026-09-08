@@ -443,6 +443,29 @@ class SolanaPaymentService(PaymentService):
         kp = self._derive_escrow_keypair(owner_wallet, agent_id)
         return str(kp.pubkey())
 
+    @property
+    def decimals(self) -> int:
+        return USDC_DECIMALS
+
+    def escrow_usdc_ata(self, escrow_address: str) -> Optional[str]:
+        """The associated token account of an escrow for the USDC mint.
+
+        Users fund an agent by transferring USDC into this ATA (SPL tokens are
+        held in ATAs, not the escrow pubkey directly). Used to verify a funding
+        transaction's on-chain destination.
+        """
+        try:
+            from solders.pubkey import Pubkey
+            from spl.token.constants import TOKEN_PROGRAM_ID
+            from spl.token.instructions import get_associated_token_address
+
+            mint = Pubkey.from_string(self.usdc_mint)
+            owner = Pubkey.from_string(escrow_address)
+            return str(get_associated_token_address(owner, mint, TOKEN_PROGRAM_ID))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("escrow_usdc_ata failed: %s", e)
+            return None
+
     def _resolver_for(
         self, from_address: str, signer_context: Optional[Dict[str, Any]]
     ) -> Any:
@@ -645,8 +668,9 @@ class SolanaPaymentService(PaymentService):
         confirmed = self._wait_for_confirmation(client, signature)
         slot = confirmed.get("slot")
 
+        is_confirmed = bool(confirmed.get("confirmed")) and not confirmed.get("err")
         return self._base_result(
-            success=True,
+            success=is_confirmed,
             tx_hash=signature,
             signature=signature,
             amount=float(amount_dec),
@@ -657,11 +681,16 @@ class SolanaPaymentService(PaymentService):
             currency="USDC",
             mint=self.usdc_mint,
             decimals=USDC_DECIMALS,
-            confirmed=confirmed.get("confirmed", True),
+            confirmed=is_confirmed,
             slot=slot,
             blockhash=blockhash,
             explorer_url=explorer_tx_url(signature, self.network),
-            message="USDC transfer submitted and confirmed on Solana",
+            err=confirmed.get("err"),
+            message=(
+                "USDC transfer confirmed on Solana"
+                if is_confirmed
+                else "USDC transfer submitted but confirmation status is unknown or failed"
+            ),
         )
 
     def _wait_for_confirmation(self, client, signature: str, timeout: Optional[float] = None) -> Dict[str, Any]:
@@ -705,7 +734,7 @@ class SolanaPaymentService(PaymentService):
         if value is None:
             raise ValueError(f"Transaction not found: {signature}")
         meta = getattr(value, "meta", None) or {}
-        return self._base_result(
+        result = self._base_result(
             signature=signature,
             found=True,
             confirmed=meta.get("err") is None,
@@ -715,6 +744,46 @@ class SolanaPaymentService(PaymentService):
             fee=meta.get("fee"),
             explorer_url=explorer_tx_url(signature, self.network),
         )
+        # Parse the actual SPL transfer so callers (e.g. funding confirmation)
+        # can verify amount / mint / destination from the chain instead of
+        # trusting a client-supplied value. Solana is the source of truth.
+        parsed = self._parse_spl_transfer(value)
+        result.update(parsed)
+        return result
+
+    def _parse_spl_transfer(self, tx_value: Any) -> Dict[str, Any]:
+        """Best-effort parse of an SPL token transfer from a parsed tx.
+
+        Returns ``{"amount":..,"mint":..,"destination":..,"source":..}`` or
+        empty dict if it can't be resolved. Used to prove funding/crediting
+        against real on-chain data.
+        """
+        parsed: Dict[str, Any] = {}
+        meta = getattr(tx_value, "meta", None)
+        tx = getattr(tx_value, "transaction", None)
+        if meta is None or tx is None:
+            return parsed
+        inner = getattr(meta, "innerInstructions", None) or []
+        top = getattr(meta, "postTokenBalances", None) or []
+        for ix in inner:
+            for inner_ix in getattr(ix, "instructions", []) or []:
+                if getattr(inner_ix, "parsed", None):
+                    info = inner_ix.parsed.get("info", {})
+                    typ = inner_ix.parsed.get("type", "")
+                    if "transfer" in typ.lower() and info:
+                        parsed = {
+                            "amount": info.get("amount"),
+                            "mint": info.get("mint"),
+                            "source": info.get("source"),
+                            "destination": info.get("destination"),
+                        }
+                        return parsed
+        # Fall back to post-token-balance deltas for a recognized mint.
+        for tb in top:
+            mint = getattr(tb, "mint", getattr(tb, "mint", "")) or ""
+            if mint and (cfg := self.usdc_mint) and mint == cfg:
+                parsed.setdefault("mint", mint)
+        return parsed
 
     def verify_transaction(self, signature: str) -> Dict[str, Any]:
         try:
@@ -743,11 +812,16 @@ class SolanaPaymentService(PaymentService):
 # Factory + singleton
 # ---------------------------------------------------------------------------
 def get_payment_service() -> PaymentService:
-    if (
-        settings.USE_REAL_PAYMENT
-        and settings.SOLANA_RPC_URL
-        and settings.SOLANA_PRIVATE_KEY
-    ):
+    if settings.is_production and not settings.USE_REAL_PAYMENT:
+        # Production must never move "money" through the simulator. If a real
+        # payment stack isn't configured, refuse to boot rather than silently
+        # running on mock (which is indistinguishable from a real balance to
+        # the calling code, and would misrepresent balances/ledger).
+        raise RuntimeError(
+            "Production requires USE_REAL_PAYMENT=true. The mock payment layer "
+            "is never available in production."
+        )
+    if settings.USE_REAL_PAYMENT and settings.SOLANA_RPC_URL and settings.SOLANA_PRIVATE_KEY:
         try:
             return SolanaPaymentService()
         except ValueError as e:
@@ -763,6 +837,11 @@ def get_payment_service() -> PaymentService:
         raise RuntimeError(
             "USE_REAL_PAYMENT=true in production requires SOLANA_RPC_URL and "
             "SOLANA_PRIVATE_KEY. Set them or turn USE_REAL_PAYMENT off."
+        )
+    if settings.is_production:
+        raise RuntimeError(
+            "Production requires USE_REAL_PAYMENT=true with valid SOLANA_RPC_URL "
+            "and SOLANA_PRIVATE_KEY. Refusing to boot on the mock layer."
         )
     return MockPaymentService()
 

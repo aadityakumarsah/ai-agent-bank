@@ -174,7 +174,38 @@ def confirm_fund(
             detail=verification.get("err", "Funding transaction could not be verified"),
         )
 
-    agent.balance = float(agent.balance) + payload.amount
+    # NEVER trust the client-supplied amount. Verify the on-chain transfer
+    # matched the intended escrow (destination), the USDC mint, and the amount
+    # before crediting the agent balance. Solana is the source of truth.
+    onchain_amount = verification.get("amount")
+    onchain_mint = verification.get("mint")
+    onchain_dest = verification.get("destination")
+    if onchain_amount is None or onchain_dest is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not parse an SPL transfer from the signed transaction.",
+        )
+    if onchain_mint and onchain_mint != payment_service.usdc_mint:
+        raise HTTPException(
+            status_code=400,
+            detail="Funding transaction uses a different token than the configured USDC.",
+        )
+    if agent.escrow_address:
+        expected_dest = getattr(
+            payment_service, "escrow_usdc_ata", lambda escrow: None
+        )(agent.escrow_address)
+        if onchain_dest != agent.escrow_address and onchain_dest != expected_dest:
+            raise HTTPException(
+                status_code=400,
+                detail="Funding transaction did not pay the agent's escrow account.",
+            )
+
+    # on-chain amount is raw token units; convert to the human USDC decimal.
+    crediting = float(onchain_amount) / (10 ** getattr(payment_service, "decimals", 6))
+    if crediting <= 0:
+        raise HTTPException(status_code=400, detail="Funding transfer amount is invalid.")
+
+    agent.balance = float(agent.balance) + crediting
     db.commit()
     db.refresh(agent)
     return _agent_to_out(agent)
