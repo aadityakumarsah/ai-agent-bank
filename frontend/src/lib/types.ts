@@ -166,6 +166,46 @@ export interface TaskRunResult {
   steps?: Array<Record<string, unknown>>;
 }
 
+export type DcaFrequency = "hourly" | "daily" | "weekly";
+export type DcaStatus = "active" | "paused" | "completed" | "cancelled";
+
+export interface DcaExecution {
+  id: number;
+  plan_id: number;
+  agent_id: number;
+  amount: number | null;
+  status: "due" | "executing" | "completed" | "failed" | "skipped";
+  error: string | null;
+  token_mint: string | null;
+  token_symbol: string | null;
+  out_amount: number | null;
+  out_unit: string | null;
+  quote_price: number | null;
+  transaction_id: number | null;
+  tx_signature: string | null;
+  created_at: string | null;
+  completed_at: string | null;
+}
+
+export interface DcaPlan {
+  id: number;
+  agent_id: number;
+  token_mint: string;
+  token_symbol: string;
+  token_decimals: number;
+  amount_per_cycle: number;
+  frequency: DcaFrequency;
+  status: DcaStatus;
+  runs_completed: number;
+  total_invested: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string | null;
+  executions?: DcaExecution[];
+}
+
 export interface ConfigStatus {
   payment_mode: "mock" | "real";
   payment_configured: boolean;
@@ -183,7 +223,7 @@ export interface ConfigStatus {
 }
 
 export interface LLMKeyStatus {
-  provider: "openai" | "anthropic" | "google";
+  provider: "openai" | "anthropic" | "google" | "openrouter";
   has_key: boolean;
   source: "user" | "server" | "mock";
 }
@@ -284,6 +324,93 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: "withdrawals", label: "Withdrawals", description: "Move funds out of agent escrow", block: "withdrawals" },
   { key: "contracts", label: "Contract interactions", description: "Call arbitrary smart contracts", block: "contracts" },
 ];
+
+export type ProviderStatus = "active" | "pending" | "disabled";
+
+export type ListingStatus = "active" | "inactive";
+
+export type PurchaseIntentStatus =
+  | "quoting"
+  | "pending_approval"
+  | "paying"
+  | "awaiting_provider"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface ProviderProfile {
+  id: number;
+  name: string;
+  description: string | null;
+  adapter: string;
+  api_base_url: string;
+  category: string;
+  wallet_address: string;
+  supports: string[];
+  status: ProviderStatus;
+  verified: boolean;
+  created_at: string | null;
+}
+
+export interface ServiceListing {
+  id: number;
+  provider_id: number;
+  provider_name: string;
+  name: string;
+  description: string | null;
+  category: string;
+  price: number;
+  currency: string;
+  parameters: Record<string, unknown>;
+  requires_payment: boolean;
+  status: ListingStatus;
+  created_at: string | null;
+}
+
+export interface QuoteOut {
+  intent_id: number;
+  status: string;
+  listing_id: number;
+  listing_name: string;
+  provider_id: number;
+  provider_name: string;
+  amount: number;
+  currency: string;
+  expires_at: string | null;
+  notes: string[];
+  quote: Record<string, unknown>;
+}
+
+export interface PurchaseOut {
+  id: number;
+  agent_id: number;
+  task_run_id: number | null;
+  listing_id: number;
+  listing_name: string;
+  provider_id: number;
+  provider_name: string;
+  provider_wallet_address: string;
+  status: PurchaseIntentStatus;
+  request_payload: unknown;
+  quote: Record<string, unknown> | null;
+  amount: number | null;
+  transaction_id: number | null;
+  error: string | null;
+  result: unknown;
+  created_at: string | null;
+  completed_at: string | null;
+}
+
+export interface PurchaseSubmitResult {
+  outcome: "completed" | "approval_required" | "blocked" | "failed";
+  approved: boolean;
+  blocked?: boolean;
+  intent_id: number;
+  reason?: string;
+  checks: unknown[];
+  transaction?: Transaction | null;
+  intent?: Record<string, unknown>;
+}
 
 export type ActivityType =
   | "request"

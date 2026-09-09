@@ -9,7 +9,6 @@ is deliberately no update or delete path, and the UI never mutates these rows.
 
 import json
 import logging
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -32,6 +31,8 @@ TRANSACTION_DENIED = "transaction_denied"
 TRANSACTION_EXECUTED = "transaction_executed"
 TRANSACTION_REJECTED = "transaction_rejected"
 TRANSACTION_CANCELLED = "transaction_cancelled"
+DCA_EXECUTED = "dca_executed"
+DCA_SKIPPED = "dca_skipped"
 
 
 class AuditService:
@@ -42,8 +43,8 @@ class AuditService:
         user_id: int,
         event: str,
         actor: str = "human",
-        agent_id: Optional[int] = None,
-        detail: Optional[dict] = None,
+        agent_id: int | None = None,
+        detail: dict | None = None,
     ) -> AuditLog:
         record = AuditLog(
             user_id=user_id,

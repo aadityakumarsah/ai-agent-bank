@@ -39,19 +39,21 @@ import { formatUsdc, formatDate, shortAddress, percentOf, explorerAddressUrl, cn
 import { spentTodayForAgent, riskLevel } from "@/lib/risk";
 import { PolicyPanel } from "@/components/agent/policy-panel";
 import { TaskRunner } from "@/components/agent/task-runner";
+import { DcaPanel } from "@/components/dca/dca-panel";
 import { TransactionTable } from "@/components/transactions/transaction-table";
 import { ActivityFeed } from "@/components/activity/activity-feed";
 import { transactionToActivity } from "@/lib/activity";
 import { signAndSendUsdcTransfer, explorerUrlForSignature } from "@/lib/solana";
 import type { Keypair } from "@solana/web3.js";
 
-type TabId = "overview" | "wallet" | "policy" | "tasks" | "transactions" | "activity";
+type TabId = "overview" | "wallet" | "policy" | "tasks" | "transactions" | "activity" | "dca";
 
 const TABS: { value: TabId; label: string }[] = [
   { value: "overview", label: "Overview" },
   { value: "wallet", label: "Wallet" },
   { value: "policy", label: "Policy" },
   { value: "tasks", label: "Tasks" },
+  { value: "dca", label: "DCA" },
   { value: "transactions", label: "Transactions" },
   { value: "activity", label: "Activity" },
 ];
@@ -279,6 +281,7 @@ export function AgentDetail({ agentId }: { agentId: number }) {
       {tab === "tasks" && (
         <TasksTab agent={agent} address={address!} runs={runs} onTransaction={() => void load()} />
       )}
+      {tab === "dca" && <DcaPanel agentId={agent.id} />}
       {tab === "transactions" && (
         <Panel title="Transactions" description="Every payment attempt for this agent" bodyClassName="p-3 sm:p-4">
           <TransactionTable transactions={transactions} hideAgent />

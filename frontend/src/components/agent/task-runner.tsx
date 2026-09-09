@@ -13,6 +13,9 @@ import {
   Inbox,
   ThumbsUp,
   ThumbsDown,
+  AlertTriangle,
+  Clock,
+  Ban,
 } from "lucide-react";
 import type { Agent, TaskRunResult } from "@/lib/types";
 import { api } from "@/lib/api";
@@ -28,6 +31,19 @@ const demoTasks = [
   "Transfer $300 to an unknown wallet",
   "Buy a market data feed for my trading strategy.",
 ];
+
+interface RunStep {
+  step_index?: number;
+  status: "in_progress" | "done" | "approval_required" | "blocked" | "failed" | "cancelled";
+  action?: string;
+  tool?: string;
+  tool_call?: string;
+  summary?: string;
+  detail?: string;
+  result?: string;
+  error?: string;
+  created_at?: string;
+}
 
 export function TaskRunner({
   agent,
@@ -145,7 +161,7 @@ export function TaskRunner({
                 : "border-border bg-card text-muted-foreground hover:text-foreground"
             )}
           >
-            {t.length > 38 ? t.slice(0, 38) + "…" : t}
+            {t.length > 38 ? t.slice(0, 38) + "..." : t}
           </button>
         ))}
       </div>
@@ -174,7 +190,7 @@ export function TaskRunner({
       >
         {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
         {running
-          ? "Agent is working…"
+          ? "Agent is working..."
           : agent.status === "active"
             ? "Run task"
             : "Agent is not active"}
@@ -194,16 +210,169 @@ function RunResult({
   deciding: boolean;
   onDecide: (action: "approve" | "reject") => void;
 }) {
-  if (result.blocked) return <BlockedRun result={result} />;
-  if (result.error) return <FailedRun result={result} />;
-  if (result.transaction?.status === "rejected") return <RejectedRun result={result} />;
-  if (result.decision?.requires_approval && !result.decision?.allowed && result.approval_required !== false) {
-    return <ApprovalRun result={result} deciding={deciding} onDecide={onDecide} />;
+  const steps = (result.steps ?? []) as unknown as RunStep[];
+
+  if (result.status === "waiting_for_approval") {
+    return (
+      <WaitingForApprovalBanner
+        result={result}
+        steps={steps}
+        deciding={deciding}
+        onDecide={onDecide}
+      />
+    );
   }
-  return <SuccessRun result={result} />;
+
+  if (result.blocked) return <BlockedRun result={result} steps={steps} />;
+  if (result.error) return <FailedRun result={result} steps={steps} />;
+  if (result.transaction?.status === "rejected") return <RejectedRun result={result} steps={steps} />;
+  if (result.decision?.requires_approval && !result.decision?.allowed && result.approval_required !== false) {
+    return <ApprovalRun result={result} deciding={deciding} onDecide={onDecide} steps={steps} />;
+  }
+  return <SuccessRun result={result} steps={steps} />;
 }
 
-function BlockedRun({ result }: { result: TaskRunResult }) {
+function StepsTimeline({ steps }: { steps: RunStep[] }) {
+  if (steps.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      {steps.map((step, i) => {
+        const idx = step.step_index ?? i;
+        const label = step.summary ?? step.tool ?? step.action ?? `Step ${idx + 1}`;
+        const detail = step.detail ?? step.result ?? step.error;
+        return (
+          <div key={idx} className="flex items-start gap-2 text-xs">
+            <div className="mt-0.5 shrink-0">
+              {step.status === "done" || step.status === "cancelled" ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+              ) : step.status === "in_progress" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />
+              ) : step.status === "approval_required" ? (
+                <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+              ) : step.status === "blocked" ? (
+                <Ban className="h-3.5 w-3.5 text-destructive" />
+              ) : step.status === "failed" ? (
+                <XCircle className="h-3.5 w-3.5 text-destructive" />
+              ) : (
+                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <span className="font-medium text-foreground">{label}</span>
+              {step.tool && (
+                <span className="ml-1.5 rounded border border-border bg-card px-1 py-px text-[10px] font-mono text-muted-foreground">
+                  {step.tool}
+                </span>
+              )}
+              {detail && (
+                <span className="ml-1.5 text-muted-foreground">
+                  {typeof detail === "string" ? detail.slice(0, 120) : ""}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function WaitingForApprovalBanner({
+  result,
+  steps,
+  deciding,
+  onDecide,
+}: {
+  result: TaskRunResult;
+  steps: RunStep[];
+  deciding: boolean;
+  onDecide: (action: "approve" | "reject") => void;
+}) {
+  const tx = result.transaction;
+  const decided = tx?.status === "executed" || tx?.status === "rejected";
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-warning/50 bg-warning/[0.05] animate-fade-up">
+      <div className="flex items-center gap-2 bg-warning/10 px-4 py-2.5">
+        <AlertTriangle className="h-4 w-4 text-warning" />
+        <div className="text-sm font-bold tracking-wide text-warning">
+          WAITING FOR APPROVAL
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        {steps.length > 0 && <StepsTimeline steps={steps} />}
+        <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-foreground">
+          Agent is waiting for human approval of its marketplace purchase. Approve in{' '}
+          <a href="/approvals" className="font-semibold text-primary hover:underline">
+            Approvals
+          </a>.
+        </div>
+        {tx && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-border bg-card p-3">
+              <div className="text-xs text-muted-foreground">Requested</div>
+              <div className="text-lg font-bold tabular-nums text-foreground">
+                {formatUsdc(tx?.amount)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-3">
+              <div className="text-xs text-muted-foreground">Recipient</div>
+              <div className="truncate text-sm font-medium text-foreground">
+                {tx?.recipient_name ?? shortAddress(tx?.recipient_address)}
+              </div>
+            </div>
+          </div>
+        )}
+        {result.result && (
+          <div className="rounded-lg border border-border bg-card p-3">
+            <div className="text-xs text-muted-foreground">Result</div>
+            <p className="mt-1 text-sm text-foreground">{result.result}</p>
+          </div>
+        )}
+        {!decided && (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-9 flex-1"
+              disabled={deciding}
+              onClick={() => onDecide("reject")}
+            >
+              {deciding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsDown className="h-4 w-4" />}
+              Reject payment
+            </Button>
+            <Button
+              variant="success"
+              size="sm"
+              className="h-9 flex-1"
+              disabled={deciding}
+              onClick={() => onDecide("approve")}
+            >
+              {deciding ? <Loader2 className="h-4 w-4 animate-spin" /> : <ThumbsUp className="h-4 w-4" />}
+              Approve &amp; execute
+            </Button>
+          </div>
+        )}
+        {decided && (
+          <div
+            className={cn(
+              "rounded-lg border px-3 py-2.5 text-sm",
+              tx?.status === "executed"
+                ? "border-success/30 bg-success/10 text-success"
+                : "border-destructive/30 bg-destructive/10 text-destructive"
+            )}
+          >
+            {tx?.status === "executed"
+              ? `Approved — ${formatUsdc(tx?.amount)} ${tx?.currency ?? "USDC"} executed.`
+              : "Rejected — the payment was refused and no money moved."}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BlockedRun({ result, steps }: { result: TaskRunResult; steps: RunStep[] }) {
   const tx = result.transaction;
   const decision = result.decision;
   return (
@@ -215,6 +384,7 @@ function BlockedRun({ result }: { result: TaskRunResult }) {
         </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
+        {steps.length > 0 && <StepsTimeline steps={steps} />}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border border-border bg-card p-3">
             <div className="text-xs text-muted-foreground">Requested</div>
@@ -231,7 +401,9 @@ function BlockedRun({ result }: { result: TaskRunResult }) {
         </div>
         <div className="rounded-lg border border-border bg-card p-3">
           <div className="text-xs text-muted-foreground">Reason</div>
-          <p className="mt-1 text-sm text-foreground">{decision?.reason ?? "Policy denied"}</p>
+          <p className="mt-1 text-sm text-foreground">
+            {result.error ?? decision?.reason ?? "Policy denied"}
+          </p>
         </div>
         {decision?.checks?.length ? (
           <div className="flex flex-col gap-1">
@@ -266,10 +438,12 @@ function ApprovalRun({
   result,
   deciding,
   onDecide,
+  steps,
 }: {
   result: TaskRunResult;
   deciding: boolean;
   onDecide: (action: "approve" | "reject") => void;
+  steps: RunStep[];
 }) {
   const tx = result.transaction;
   const decision = result.decision;
@@ -284,6 +458,7 @@ function ApprovalRun({
         </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
+        {steps.length > 0 && <StepsTimeline steps={steps} />}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border border-border bg-card p-3">
             <div className="text-xs text-muted-foreground">Requested</div>
@@ -352,7 +527,7 @@ function ApprovalRun({
   );
 }
 
-function RejectedRun({ result }: { result: TaskRunResult }) {
+function RejectedRun({ result, steps }: { result: TaskRunResult; steps: RunStep[] }) {
   const tx = result.transaction;
   return (
     <div className="overflow-hidden rounded-xl border border-destructive/40 bg-destructive/[0.04] animate-fade-up">
@@ -361,6 +536,7 @@ function RejectedRun({ result }: { result: TaskRunResult }) {
         <div className="text-sm font-bold tracking-wide text-destructive">PAYMENT REJECTED</div>
       </div>
       <div className="flex flex-col gap-3 p-4">
+        {steps.length > 0 && <StepsTimeline steps={steps} />}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border border-border bg-card p-3">
             <div className="text-xs text-muted-foreground">Requested</div>
@@ -388,7 +564,7 @@ function RejectedRun({ result }: { result: TaskRunResult }) {
   );
 }
 
-function SuccessRun({ result }: { result: TaskRunResult }) {
+function SuccessRun({ result, steps }: { result: TaskRunResult; steps: RunStep[] }) {
   const tx = result.transaction;
   return (
     <div className="overflow-hidden rounded-xl border border-success/40 bg-success/[0.04] animate-fade-up">
@@ -397,6 +573,7 @@ function SuccessRun({ result }: { result: TaskRunResult }) {
         <div className="text-sm font-bold tracking-wide text-success">PAYMENT EXECUTED</div>
       </div>
       <div className="flex flex-col gap-3 p-4">
+        {steps.length > 0 && <StepsTimeline steps={steps} />}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border border-border bg-card p-3">
             <div className="text-xs text-muted-foreground">Amount</div>
@@ -438,6 +615,12 @@ function SuccessRun({ result }: { result: TaskRunResult }) {
               </a>
             </div>
           ))}
+        {result.result && (
+          <div className="rounded-lg border border-border bg-card p-3">
+            <div className="text-xs text-muted-foreground">Result</div>
+            <p className="mt-1 text-sm text-foreground">{result.result}</p>
+          </div>
+        )}
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <ShieldCheck className="h-3.5 w-3.5 text-success" />
           All policy checks passed — the payment was submitted through the policy engine.
@@ -447,14 +630,15 @@ function SuccessRun({ result }: { result: TaskRunResult }) {
   );
 }
 
-function FailedRun({ result }: { result: TaskRunResult }) {
+function FailedRun({ result, steps }: { result: TaskRunResult; steps: RunStep[] }) {
   return (
     <div className="overflow-hidden rounded-xl border border-destructive/40 bg-destructive/[0.04] animate-fade-up">
       <div className="flex items-center gap-2 bg-destructive/10 px-4 py-2.5">
         <XCircle className="h-4 w-4 text-destructive" />
         <div className="text-sm font-bold tracking-wide text-destructive">EXECUTION FAILED</div>
       </div>
-      <div className="p-4">
+      <div className="flex flex-col gap-3 p-4">
+        {steps.length > 0 && <StepsTimeline steps={steps} />}
         <div className="flex items-start gap-2 text-sm text-muted-foreground">
           <Terminal className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           {result.error}

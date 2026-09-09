@@ -6,6 +6,7 @@ from app.services.ai_service import (
     OpenAIProvider,
     AnthropicProvider,
     GoogleProvider,
+    OpenRouterProvider,
     MockLLMProvider,
     llm_service,
 )
@@ -24,7 +25,7 @@ def test_llm_key_round_trip(client, db):
     r = client.get(base)
     assert r.status_code == 200, r.text
     empty = {k["provider"]: k for k in r.json()}
-    assert set(empty) == {"openai", "anthropic", "google"}
+    assert set(empty) == {"openai", "anthropic", "google", "openrouter"}
     assert all(
         entry["has_key"] is False and entry["source"] == "mock"
         for entry in empty.values()
@@ -85,6 +86,9 @@ def test_resolve_provider_prefers_user_key_over_server_and_mock():
 
     user_google = llm_service.resolve_provider("google", "ai-user-provided")
     assert isinstance(user_google, GoogleProvider)
+
+    user_openrouter = llm_service.resolve_provider("openrouter", "sk-or-v1-user")
+    assert isinstance(user_openrouter, OpenRouterProvider)
 
     # With no keys at all (test env strips server keys) we fall back to mock.
     assert isinstance(llm_service.active_provider, MockLLMProvider)

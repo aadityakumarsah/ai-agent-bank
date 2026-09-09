@@ -21,7 +21,6 @@ def upgrade() -> None:
     bind = op.get_bind()
 
     # 1. agents.violation_count (deterministic risk input for the risk engine)
-    cols = [c["name"] for c in bind.execute(sa.text("PRAGMA table_info(agents)")).fetchall()] if bind.dialect.name == "sqlite" else []
     try:
         op.add_column("agents", sa.Column("violation_count", sa.Integer(), nullable=True))
     except Exception:

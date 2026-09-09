@@ -64,10 +64,15 @@ function TogglePill({ enabled, label }: { enabled: boolean; label: string }) {
 }
 
 const PROVIDER_META: {
-  id: "openai" | "anthropic" | "google";
+  id: "openai" | "anthropic" | "google" | "openrouter";
   label: string;
   placeholder: string;
 }[] = [
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    placeholder: "sk-or-v1-…",
+  },
   {
     id: "openai",
     label: "OpenAI",
@@ -175,7 +180,7 @@ function ProviderRow({
   onSave,
   onRemove,
 }: {
-  meta: { id: "openai" | "anthropic" | "google"; label: string; placeholder: string };
+  meta: { id: "openai" | "anthropic" | "google" | "openrouter"; label: string; placeholder: string };
   status: LLMKeyStatus;
   saving: string | null;
   onSave: (provider: string, apiKey: string) => Promise<void>;

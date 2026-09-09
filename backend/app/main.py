@@ -4,21 +4,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core.config import settings
-from app.core.logging import configure_logging
 from app.api.api_v1 import (
-    users,
-    agents,
-    transactions,
     agent_runs,
+    agents,
+    auth,
+    config,
+    dca,
     demo,
     demo_scenarios,
-    config,
-    marketplace,
     llm_keys,
-    auth,
+    marketplace,
+    providers,
+    transactions,
+    users,
 )
 from app.api.errors import install_exception_handlers
+from app.core.config import settings
+from app.core.logging import configure_logging
 from app.middleware.request_context import RequestContextMiddleware
 
 configure_logging()
@@ -55,6 +57,8 @@ def create_app() -> FastAPI:
     app.include_router(marketplace.router, prefix=settings.API_V1_STR)
     app.include_router(llm_keys.router, prefix=settings.API_V1_STR)
     app.include_router(auth.router, prefix=settings.API_V1_STR)
+    app.include_router(providers.router, prefix=settings.API_V1_STR)
+    app.include_router(dca.router, prefix=settings.API_V1_STR)
 
     # DEMO-only simulation endpoints: one-click attack scenarios and the demo
     # service directory. Never mounted in real mode — a real deployment has no
@@ -64,21 +68,31 @@ def create_app() -> FastAPI:
         app.include_router(demo_scenarios.router, prefix=settings.API_V1_STR)
 
     @app.on_event("startup")
-    def on_startup() -> None:
+    async def on_startup() -> None:
         # Fail fast when a production deployment is misconfigured (never start
         # a real-money service that silently degraded to demo/sqlite).
         settings.verify_production_config()
 
-        # Create tables on startup for dev convenience. Production uses
+        # Create tables on startup for dev convenience only. Production uses
         # `alembic upgrade head` and never auto-creates tables here.
-        if settings.is_production:
-            return
-        try:
-            from app.db.session import init_db
+        if not settings.is_production:
+            try:
+                from app.db.session import init_db
 
-            init_db()
-        except Exception as e:  # pragma: no cover
-            logger.error("Failed to initialize database on startup: %s", e)
+                init_db()
+            except Exception as e:  # pragma: no cover
+                logger.error("Failed to initialize database on startup: %s", e)
+
+        # DCA scheduler runs in dev and prod alike.
+        from app.services.dca_scheduler import dca_scheduler
+
+        dca_scheduler.start()
+
+    @app.on_event("shutdown")
+    async def on_shutdown() -> None:
+        from app.services.dca_scheduler import dca_scheduler
+
+        await dca_scheduler.stop()
 
     @app.get("/")
     async def root():

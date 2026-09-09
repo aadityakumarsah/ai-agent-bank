@@ -1,19 +1,21 @@
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import (
-    Policy,
-    Transaction,
-    TransactionStatus,
     Agent,
     AgentStatus,
+    Policy,
+    ProviderProfile,
+    ProviderStatus,
+    Transaction,
     TransactionLog,
+    TransactionStatus,
 )
 from app.services.risk_engine import risk_engine
 from app.services.trust_registry import trust_registry
@@ -96,6 +98,22 @@ class PolicyEngine:
             "category": "api",
         },
     }
+
+    def _registered_provider(self, db: Session, address: str) -> Optional[dict]:
+        """A wallet registered in the marketplace as an active, verified
+        provider is a vetted merchant — safe to pay within policy limits."""
+        provider = (
+            db.query(ProviderProfile)
+            .filter(
+                ProviderProfile.wallet_address == address,
+                ProviderProfile.status == ProviderStatus.active,
+                ProviderProfile.verified.is_(True),
+            )
+            .first()
+        )
+        if provider is None:
+            return None
+        return {"name": provider.name, "category": provider.category.value}
 
     def _parse_json(self, value: str, default: Any) -> Any:
         if not value:
@@ -328,13 +346,15 @@ class PolicyEngine:
 
         recipient_trusted = (known_provider is not None) or (recipient_address in whitelist)
         registry_entry = trust_registry.lookup(recipient_address)
-        merchant_known = bool(registry_entry.get("trusted")) or recipient_trusted
+        registered_provider = self._registered_provider(db, recipient_address)
+        merchant_known = bool(registry_entry.get("trusted")) or recipient_trusted or (registered_provider is not None)
 
         # For demo/real: addresses are pseudonymous; we can't cryptographically
         # determine 'human' vs 'agent' yet, so we enforce:
-        #   - blocked_human_transfers: if the recipient is NOT in the whitelist nor
-        #     a known provider, and human transfers are blocked, deny.
-        if known_provider is None and recipient_address not in whitelist:
+        #   - blocked_human_transfers: if the recipient is NOT a known merchant
+        #     (registered marketplace provider, official demo provider, or the
+        #     owner's explicit whitelist) and human transfers are blocked, deny.
+        if not merchant_known:
             if policy.blocked_human_transfers:
                 return _fail(
                     f"Recipient '{recipient_name or recipient_address}' is unknown. Human transfers are disabled.",
@@ -354,12 +374,18 @@ class PolicyEngine:
                 }
             )
         else:
+            if registered_provider is not None:
+                detail = f"Registered marketplace provider: {registered_provider['name']}"
+            elif recipient_trusted:
+                detail = "Known provider or whitelisted"
+            else:
+                detail = "Trusted recipient (registry)"
             checks.append(
                 {
                     "name": "Recipient trusted",
                     "passed": True,
                     "recipient": recipient_name or recipient_address,
-                    "detail": "Known provider or whitelisted",
+                    "detail": detail,
                 }
             )
 

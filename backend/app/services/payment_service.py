@@ -443,6 +443,15 @@ class SolanaPaymentService(PaymentService):
         kp = self._derive_escrow_keypair(owner_wallet, agent_id)
         return str(kp.pubkey())
 
+    def resolve_escrow_keypair(self, owner_wallet: str, agent_id: int):
+        """Return the per-agent escrow Keypair (single source of truth).
+
+        Used by the swap/DCA path to sign a Jupiter swap where the escrow is
+        the initiator — the same deterministic escrow the payment layer signs
+        with, so one agent maps to exactly one controlled wallet.
+        """
+        return self._derive_escrow_keypair(owner_wallet, int(agent_id))
+
     @property
     def decimals(self) -> int:
         return USDC_DECIMALS

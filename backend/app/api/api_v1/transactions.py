@@ -17,6 +17,7 @@ from app.services.audit_service import (
     audit_service,
 )
 from app.services.payment_flow import attempt_execution, transaction_to_dict
+from app.services.purchase_service import purchase_service
 
 router = APIRouter(
     prefix="/users/{wallet_address}/transactions",
@@ -138,12 +139,22 @@ def approve_transaction(
     )
     settled = executed["transaction"]
 
+    # If this payment settles a marketplace purchase, finish the real provider
+    # fulfilment and reflect it on the linked agent run.
+    purchase = purchase_service.resume_after_payment(db, settled) if settled else None
+
     return {
         "approved": True,
         "executed": executed["executed"],
         "reason": executed["reason"],
         "transaction": _tx_to_out(settled),
         "tx_detail": transaction_to_dict(settled),
+        "purchase": {
+            "id": purchase.id,
+            "status": purchase.status.value,
+        }
+        if purchase
+        else None,
     }
 
 

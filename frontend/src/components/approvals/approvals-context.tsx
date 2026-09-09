@@ -25,6 +25,7 @@ interface ApprovalsContextValue {
   approveRequest: (id: string) => void;
   rejectRequest: (id: string) => void;
   syncFromTransactions: (txs: ApprovalSyncTx[], agentIdToName?: Map<number, string>) => void;
+  loadBackendApprovals: (wallet: string) => void;
 }
 
 const ApprovalsContext = createContext<ApprovalsContextValue>({
@@ -33,6 +34,7 @@ const ApprovalsContext = createContext<ApprovalsContextValue>({
   approveRequest: () => {},
   rejectRequest: () => {},
   syncFromTransactions: () => {},
+  loadBackendApprovals: () => {},
 });
 
 export function useApprovals() {
@@ -64,10 +66,57 @@ export function ApprovalsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const loadBackendApprovals = useCallback(
+    (wallet: string) => {
+      if (!wallet) return;
+      let cancelled = false;
+      api
+        .listTransactions(wallet)
+        .then((txs) => {
+          if (cancelled) return;
+          const now = Date.now();
+          const fresh: ApprovalRequest[] = txs
+            .filter(
+              (t) =>
+                (t.status === "pending" || t.status === "approved") &&
+                !seeded.current.has(t.id)
+            )
+            .map((t): ApprovalRequest => {
+              seeded.current.add(t.id);
+              return {
+                id: `tx-${t.id}`,
+                agentName: t.recipient_name ?? `Agent #${t.agent_id}`,
+                agentId: t.agent_id,
+                amount: t.amount,
+                currency: t.currency ?? "USDC",
+                reason: "Policy check — amount above approval threshold.",
+                policyNote:
+                  "Transactions above the approval threshold require human approval.",
+                recipientName: t.recipient_name ?? undefined,
+                recipient: t.recipient_address,
+                category: t.category ?? undefined,
+                transactionId: t.id,
+                expiresAt: now + 15 * 60 * 1000,
+                status: "pending",
+              };
+            });
+          if (fresh.length) {
+            setRequests((prev) => [...prev, ...fresh]);
+          }
+        })
+        .catch(() => {
+          /* offline */
+        });
+      return () => {
+        cancelled = true;
+      };
+    },
+    []
+  );
+
   const syncFromTransactions = useCallback(
     (txs: ApprovalSyncTx[], agentIdToName?: Map<number, string>) => {
       const now = Date.now();
-      const existingIds = new Set(requests.map((r) => r.id));
       const fresh: ApprovalRequest[] = txs
         .filter(
           (t) =>
@@ -93,17 +142,16 @@ export function ApprovalsProvider({ children }: { children: React.ReactNode }) {
             expiresAt: now + 15 * 60 * 1000,
             status: "pending",
           };
-        })
-        .filter((r) => !existingIds.has(r.id));
+        });
       if (fresh.length) {
         setRequests((prev) => [...prev, ...fresh]);
       }
     },
-    [requests]
+    []
   );
 
   const approveRequest = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const target = requests.find((r) => r.id === id);
       setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status: "approved" } : r)));
       if (target) {
@@ -118,7 +166,7 @@ export function ApprovalsProvider({ children }: { children: React.ReactNode }) {
   );
 
   const rejectRequest = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const target = requests.find((r) => r.id === id);
       setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status: "rejected" } : r)));
       if (target) {
@@ -141,8 +189,15 @@ export function ApprovalsProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ requests, pendingCount, approveRequest, rejectRequest, syncFromTransactions }),
-    [requests, pendingCount, approveRequest, rejectRequest]
+    () => ({
+      requests,
+      pendingCount,
+      approveRequest,
+      rejectRequest,
+      syncFromTransactions,
+      loadBackendApprovals,
+    }),
+    [requests, pendingCount, approveRequest, rejectRequest, syncFromTransactions, loadBackendApprovals]
   );
 
   return <ApprovalsContext.Provider value={value}>{children}</ApprovalsContext.Provider>;

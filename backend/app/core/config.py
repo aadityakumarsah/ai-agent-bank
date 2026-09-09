@@ -1,6 +1,7 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, List
 import os
+from typing import List, Optional
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -60,10 +61,34 @@ class Settings(BaseSettings):
     NEXT_PUBLIC_SOLANA_RPC_URL: str = os.getenv("NEXT_PUBLIC_SOLANA_RPC_URL", "")
     USE_REAL_PAYMENT: bool = os.getenv("USE_REAL_PAYMENT", "false").lower() == "true"
 
+    # DCA / swaps. The USDC mint used on the Jupiter DEX for token swaps is
+    # distinct from the SPL-token faucet mint used for simple transfers, and
+    # differs by network. Blank auto-selects Jupiter's devnet/mainnet USDC.
+    SWAP_USDC_MINT: str = os.getenv("SWAP_USDC_MINT", "")
+    JUPITER_QUOTE_URL: str = os.getenv(
+        "JUPITER_QUOTE_URL", "https://lite-api.jup.ag/swap/v1/quote"
+    )
+    JUPITER_SWAP_URL: str = os.getenv(
+        "JUPITER_SWAP_URL", "https://lite-api.jup.ag/swap/v1/swap"
+    )
+    JUPITER_DEFAULT_SLIPPAGE_BPS: int = int(os.getenv("JUPITER_DEFAULT_SLIPPAGE_BPS", "50"))
+    # Interval (seconds) the in-process DCA scheduler sleeps between scans.
+    DCA_SCAN_INTERVAL_S: int = int(os.getenv("DCA_SCAN_INTERVAL_S", "60"))
+
     # AI API Keys
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     GOOGLE_AI_API_KEY: str = os.getenv("GOOGLE_AI_API_KEY", "")
+    # OpenRouter: OpenAI-compatible gateway to many models. One key unlocks
+    # hundreds of models; the model id follows OpenRouter's "vendor/model" form.
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    OPENROUTER_BASE_URL: str = os.getenv(
+        "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+    )
+    # Model for Gemini function calling. Default is a current model that exists;
+    # override (e.g. a region-restricted model alias) without touching code.
+    GOOGLE_AI_MODEL: str = os.getenv("GOOGLE_AI_MODEL", "gemini-3.6-flash")
 
     # Fernet key (urlsafe base64 of 32 bytes) used to encrypt end-user-supplied
     # LLM API keys at rest. If blank we derive a stable key from SECRET_KEY so

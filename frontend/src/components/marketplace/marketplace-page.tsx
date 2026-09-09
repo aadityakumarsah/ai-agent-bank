@@ -1,18 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Store, Zap, ShieldOff, Sparkles } from "lucide-react";
+import { Store, Zap, ShieldOff, Sparkles, Package } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Tabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { DirectorySection } from "@/components/marketplace/directory-section";
 import { DemoSection } from "@/components/marketplace/demo-section";
 import { ScenarioSection } from "@/components/marketplace/scenario-section";
+import { RealMarketplaceSection } from "@/components/marketplace/real-marketplace-section";
 import { useConfigStatus } from "@/hooks/use-config-status";
+import { useWalletConnection } from "@/components/wallet/wallet-context";
 import { api } from "@/lib/api";
 import type { MarketService } from "@/lib/types";
 
-type Tab = "directory" | "killer" | "failed" | "scenarios";
+type Tab = "directory" | "providers" | "killer" | "failed" | "scenarios";
 
 export function MarketplacePage() {
   const [tab, setTab] = useState<Tab>("directory");
@@ -21,6 +23,7 @@ export function MarketplacePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const { status } = useConfigStatus();
+  const { address } = useWalletConnection();
   const demoMode = status?.demo_mode === true;
 
   const load = useCallback(async () => {
@@ -72,6 +75,7 @@ export function MarketplacePage() {
       <Tabs<Tab>
         tabs={[
           { value: "directory", label: "Service Directory", icon: <Store className="h-4 w-4" /> },
+          { value: "providers", label: "Providers", icon: <Package className="h-4 w-4" /> },
           { value: "killer", label: "Autonomous Purchase", icon: <Zap className="h-4 w-4" /> },
           { value: "failed", label: "Blocked Payment", icon: <ShieldOff className="h-4 w-4" /> },
           ...(demoMode
@@ -93,6 +97,7 @@ export function MarketplacePage() {
             onSelect={setSelectedId}
           />
         )}
+        {tab === "providers" && <RealMarketplaceSection address={address} />}
         {tab === "killer" && <DemoSection kind="killer" />}
         {tab === "failed" && <DemoSection kind="failed" />}
         {tab === "scenarios" && demoMode && <ScenarioSection />}

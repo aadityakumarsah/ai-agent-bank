@@ -16,11 +16,25 @@ import { summarizeAgents } from "@/lib/activity";
 import { formatUsdc, shortAddress } from "@/lib/utils";
 
 export function ApprovalsPage() {
-  const { requests, pendingCount, approveRequest, rejectRequest, syncFromTransactions } =
-    useApprovals();
+  const {
+    requests,
+    pendingCount,
+    approveRequest,
+    rejectRequest,
+    syncFromTransactions,
+    loadBackendApprovals,
+  } = useApprovals();
   const { agents, transactions, error, load } = useBankData();
-  const { address } = useWalletConnection();
+  const { address, connected } = useWalletConnection();
   const { toast } = useToast();
+
+  // In real mode (non-demo), fetch pending transactions from the backend
+  // whenever the wallet address changes.
+  useEffect(() => {
+    if (connected && address) {
+      loadBackendApprovals(address);
+    }
+  }, [connected, address, loadBackendApprovals]);
 
   useEffect(() => {
     if (transactions.length) {
@@ -142,7 +156,7 @@ export function ApprovalsPage() {
                   <div className="min-w-0">
                     <div className="truncate text-sm text-foreground">
                       {r.agentName}
-                      <span className="mx-1.5 text-muted-foreground">·</span>
+                      <span className="mx-1.5 text-muted-foreground">&middot;</span>
                       <span className="font-semibold tabular-nums">
                         {formatUsdc(r.amount)} {r.currency}
                       </span>

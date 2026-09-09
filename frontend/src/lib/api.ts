@@ -1,6 +1,10 @@
 import type {
   Agent,
   ConfigStatus,
+  DcaExecution,
+  DcaFrequency,
+  DcaPlan,
+  DcaStatus,
   DemoResult,
   DemoScenario,
   DemoScenarioRunResult,
@@ -8,7 +12,12 @@ import type {
   LLMKeyStatus,
   MarketService,
   Policy,
+  ProviderProfile,
+  PurchaseOut,
+  PurchaseSubmitResult,
+  QuoteOut,
   ScenarioId,
+  ServiceListing,
   ServicePaymentResult,
   ServiceRequestResult,
   TaskRunResult,
@@ -142,6 +151,42 @@ export const api = {
   listRuns: (wallet: string, agentId: number) =>
     request<TaskRunResult[]>(`/users/${wallet}/agents/${agentId}/runs`),
 
+  // DCA plans
+  listDcaPlans: (wallet: string, agentId?: number) =>
+    request<DcaPlan[]>(
+      `/users/${wallet}/dca${agentId ? `?agent_id=${agentId}` : ""}`
+    ),
+  getDcaPlan: (wallet: string, planId: number, includeExecutions = false) =>
+    request<DcaPlan>(
+      `/users/${wallet}/dca/${planId}${
+        includeExecutions ? "?include_executions=true" : ""
+      }`
+    ),
+  createDcaPlan: (
+    wallet: string,
+    plan: {
+      agent_id: number;
+      token_mint: string;
+      token_symbol?: string;
+      token_decimals?: number;
+      amount_per_cycle: number;
+      frequency: DcaFrequency;
+      starts_at?: string | null;
+      ends_at?: string | null;
+    }
+  ) =>
+    request<DcaPlan>(`/users/${wallet}/dca`, {
+      method: "POST",
+      body: JSON.stringify(plan),
+    }),
+  updateDcaPlanStatus: (wallet: string, planId: number, status: DcaStatus) =>
+    request<DcaPlan>(`/users/${wallet}/dca/${planId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  listDcaExecutions: (wallet: string, planId: number) =>
+    request<DcaExecution[]>(`/users/${wallet}/dca/${planId}/executions`),
+
   // Demo
   demoCheck: (payload: {
     agent_id: number;
@@ -204,6 +249,36 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ client_request_id: clientRequestId ?? null }),
     }),
+
+  // Real provider marketplace
+  listProviders: () => request<ProviderProfile[]>("/marketplace/providers"),
+  registerProvider: (body: {
+    name: string;
+    adapter: string;
+    api_base_url: string;
+    category: string;
+    wallet_address: string;
+    supports: string[];
+    description?: string;
+    owner_wallet?: string;
+  }) =>
+    request<ProviderProfile>("/marketplace/providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listListings: () => request<ServiceListing[]>("/marketplace/listings"),
+  quoteListing: (listingId: number, agentId: number, payload: Record<string, unknown>) =>
+    request<QuoteOut>(`/marketplace/listings/${listingId}/quote`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId, payload }),
+    }),
+  submitPurchase: (intentId: number) =>
+    request<PurchaseSubmitResult>("/marketplace/purchases", {
+      method: "POST",
+      body: JSON.stringify({ intent_id: intentId }),
+    }),
+  listPurchasesByAgent: (agentId: number) =>
+    request<PurchaseOut[]>(`/marketplace/purchases?agent_id=${agentId}`),
 };
 
 export interface PolicyInput {

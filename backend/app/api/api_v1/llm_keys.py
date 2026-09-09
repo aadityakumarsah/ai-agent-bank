@@ -16,12 +16,13 @@ router = APIRouter(
     dependencies=[Depends(require_wallet_ownership)],
 )
 
-PROVIDERS = ["openai", "anthropic", "google"]
+PROVIDERS = ["openai", "anthropic", "google", "openrouter"]
 
 _SERVER_SOURCE = {
     "openai": bool(settings.OPENAI_API_KEY),
     "anthropic": bool(settings.ANTHROPIC_API_KEY),
     "google": bool(settings.GOOGLE_AI_API_KEY),
+    "openrouter": bool(settings.OPENROUTER_API_KEY),
 }
 
 

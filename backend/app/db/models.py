@@ -1,24 +1,28 @@
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Numeric,
-    Text,
-    Enum,
-)
-from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
-from app.db.base import Base
 import enum
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.db.base import Base
 
 
 class LLMProviderName(str, enum.Enum):
     openai = "openai"
     anthropic = "anthropic"
     google = "google"
+    openrouter = "openrouter"
 
 
 class ServiceCategory(str, enum.Enum):
@@ -28,6 +32,33 @@ class ServiceCategory(str, enum.Enum):
     ai_model = "ai_model"
     storage = "storage"
     other_agent = "other_agent"
+
+
+class ProviderStatus(str, enum.Enum):
+    pending = "pending"
+    active = "active"
+    suspended = "suspended"
+
+
+class ListingStatus(str, enum.Enum):
+    active = "active"
+    inactive = "inactive"
+
+
+class PurchaseIntentStatus(str, enum.Enum):
+    """Lifecycle of a real purchase (agent buys a provider service).
+
+    Only one of ``quoting``/``pending_approval``/``paying`` runs at a time; the
+    intent never skips forward without the prior stage completing.
+    """
+
+    quoting = "quoting"  # quote requested; amount agreed
+    pending_approval = "pending_approval"  # human must approve (policy/risk)
+    paying = "paying"  # USDC transfer in flight
+    awaiting_provider = "awaiting_provider"  # paid; waiting on provider result
+    completed = "completed"  # provider returned the real result
+    failed = "failed"  # policy block / payment failure / provider error
+    cancelled = "cancelled"  # abandoned by the human/agent
 
 
 class ServiceRiskLevel(str, enum.Enum):
@@ -119,6 +150,15 @@ class Agent(Base):
     audit_logs = relationship(
         "AuditLog", back_populates="agent", cascade="all, delete-orphan"
     )
+    purchases = relationship(
+        "PurchaseIntent", back_populates="agent", cascade="all, delete-orphan"
+    )
+    dca_plans = relationship(
+        "DcaPlan", back_populates="agent", cascade="all, delete-orphan"
+    )
+    dca_executions = relationship(
+        "DcaExecution", back_populates="agent", cascade="all, delete-orphan"
+    )
 
 
 class PolicyCategory(str, enum.Enum):
@@ -162,6 +202,7 @@ class TransactionType(str, enum.Enum):
     payment = "payment"
     withdrawal = "withdrawal"
     approval = "approval"
+    swap = "swap"
 
 
 class TransactionStatus(str, enum.Enum):
@@ -281,4 +322,209 @@ class UserAPIKey(Base):
     user = relationship("User", backref="api_keys")
 
 
-# We'll add a relationship from Agent to TaskRun if needed, but not necessary for now.
+class ProviderProfile(Base):
+    """
+    A real marketplace provider registered by a wallet owner.
+
+    ``api_base_url`` is the integration endpoint the agent bank calls to quote
+    and execute the advertised service (e.g. a machine-readable translation
+    API). ``wallet_address`` is the USDC recipient the agent pays on devnet
+    (pseudo-random placeholder until a real merchant wallet is provided).
+    ``supports`` declares the capabilities a listing relies on, so the agent
+    bank can route tool calls to providers that actually offer them.
+    """
+
+    __tablename__ = "providers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False, unique=True, index=True)
+    description = Column(Text)
+    adapter = Column(String, nullable=False)  # e.g. "mymemory"
+    api_base_url = Column(String(512), nullable=False)
+    category = Column(Enum(ServiceCategory), default=ServiceCategory.api)
+    wallet_address = Column(String, nullable=False)  # USDC recipient for payments
+    supports = Column(Text, default="[]")  # JSON list of capability strings
+    status = Column(Enum(ProviderStatus), default=ProviderStatus.pending)
+    verified = Column(Boolean, default=False)  # registry connectivity check passed
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    owner = relationship("User", backref="providers")
+    listings = relationship(
+        "ServiceListing", back_populates="provider", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<ProviderProfile {self.name} ({self.adapter})>"
+
+
+class ServiceListing(Base):
+    """
+    A payable service a provider offers, advertised to agents (e.g. "translate
+    an English paragraph to Spanish"). ``price`` is the flat USDC amount per
+    request; ``parameters`` holds a JSON schema the adapter validates request
+    payloads against before quoting.
+    """
+
+    __tablename__ = "service_listings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    category = Column(Enum(ServiceCategory), nullable=False)
+    price = Column(Numeric(20, 6), nullable=False, default=0)  # USDC
+    currency = Column(String, default="USDC")
+    parameters = Column(Text, default="{}")  # JSON schema of accepted params
+    requires_payment = Column(Boolean, default=True)
+    status = Column(Enum(ListingStatus), default=ListingStatus.active)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    provider = relationship("ProviderProfile", back_populates="listings")
+    purchases = relationship("PurchaseIntent", back_populates="listing")
+
+    __table_args__ = (
+        # A provider can't publish two listings with the same name.
+        UniqueConstraint("provider_id", "name", name="uq_listing_provider_name"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<ServiceListing {self.name} ({self.category.value})>"
+
+
+class PurchaseIntent(Base):
+    """
+    A purchase an agent intent to make against a specific listing at a quoted
+    price — the canonical record of "the agent buys things". Tracks every stage
+    from quote to verified provider result and links the ledger payment row
+    (``transaction_id``), so the purchase, its money movement and its result are
+    one auditable unit.
+    """
+
+    __tablename__ = "purchase_intents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_run_id = Column(Integer, ForeignKey("task_runs.id"), nullable=True)
+    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    listing_id = Column(Integer, ForeignKey("service_listings.id"), nullable=False)
+    status = Column(Enum(PurchaseIntentStatus), default=PurchaseIntentStatus.quoting)
+    request_payload = Column(Text, default="{}")  # JSON params sent to the provider
+    quote = Column(Text, nullable=True)  # JSON quote from the provider
+    amount = Column(Numeric(20, 6), nullable=True)  # agreed USDC amount
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    idempotency_key = Column(String, nullable=True, unique=True, index=True)
+    provider_ref = Column(String(512), nullable=True)  # provider-side reference
+    result = Column(Text, nullable=True)  # JSON final result / provider payload
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    agent = relationship("Agent", back_populates="purchases")
+    user = relationship("User", backref="purchases")
+    run = relationship("TaskRun", backref="purchases")
+    provider = relationship("ProviderProfile", backref="purchases")
+    listing = relationship("ServiceListing", back_populates="purchases")
+    transaction = relationship("Transaction", backref="purchase")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<PurchaseIntent {self.id} {self.status.value}>"
+
+
+class DcaFrequency(str, enum.Enum):
+    """How often a DCA plan places a trade."""
+
+    hourly = "hourly"
+    daily = "daily"
+    weekly = "weekly"
+
+
+class DcaStatus(str, enum.Enum):
+    active = "active"
+    paused = "paused"
+    completed = "completed"
+    cancelled = "cancelled"
+
+
+class DcaExecutionStatus(str, enum.Enum):
+    """Lifecycle of a single scheduled DCA trade."""
+
+    due = "due"  # scheduled, not yet attempted
+    executing = "executing"  # swap in flight
+    completed = "completed"  # swap executed successfully
+    failed = "failed"  # policy block / payment / swap error
+    skipped = "skipped"  # not enough balance this cycle
+
+
+class DcaPlan(Base):
+    """
+    A dollar-cost-averaging plan: periodically spend a fixed USDC amount from an
+    agent's balance to buy a token via Jupiter.
+
+    The plan is policy-governed — each trade runs through the same balance
+    check, daily/monthly caps and approval threshold as any other movement, and
+    is recorded as a ``swap`` Transaction with a stable ``idempotency_key`` so a
+    scheduler re-run can never double-pay.
+    """
+
+    __tablename__ = "dca_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token_mint = Column(String, nullable=False)  # SPL token mint to buy
+    token_symbol = Column(String, nullable=True)  # human label, e.g. "SOL"
+    token_decimals = Column(Integer, default=9)
+    amount_per_cycle = Column(Numeric(20, 6), nullable=False)  # USDC per trade
+    frequency = Column(Enum(DcaFrequency), nullable=False)
+    status = Column(Enum(DcaStatus), default=DcaStatus.active)
+    runs_completed = Column(Integer, default=0)
+    total_invested = Column(Numeric(20, 6), default=0)  # summed USDC spent
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    starts_at = Column(DateTime(timezone=True), nullable=True)
+    ends_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    agent = relationship("Agent", back_populates="dca_plans")
+    user = relationship("User", backref="dca_plans")
+    executions = relationship(
+        "DcaExecution", back_populates="plan", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<DcaPlan {self.id} {self.token_symbol} {self.frequency.value}>"
+
+
+class DcaExecution(Base):
+    """One scheduled trade attempted by a DCA plan."""
+
+    __tablename__ = "dca_executions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("dca_plans.id"), nullable=False)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(Enum(DcaExecutionStatus), default=DcaExecutionStatus.due)
+    amount = Column(Numeric(20, 6), nullable=False)  # USDC spent
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    out_amount = Column(Numeric(30, 10), nullable=True)  # token received (sat)
+    out_unit = Column(String(24), nullable=True)  # "sat" or token ui amount
+    token_mint = Column(String, nullable=True)
+    token_symbol = Column(String, nullable=True)
+    quote_price = Column(Numeric(30, 12), nullable=True)  # price per token (USDC)
+    tx_signature = Column(String, nullable=True)
+    error = Column(Text, nullable=True)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    plan = relationship("DcaPlan", back_populates="executions")
+    agent = relationship("Agent", back_populates="dca_executions")
+    user = relationship("User", backref="dca_executions")
+    transaction = relationship("Transaction", backref="dca_execution")
